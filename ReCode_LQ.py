@@ -6,11 +6,14 @@ import numpy as np
 import traceback
 
 global_path = "C:/chaos_integrated_tools/data_analysis/scene"
-SHRINK_PIXELS = 4
+SHRINK_PIXELS = 4   # 裁剪像素
+FINAL_TEXTURE_MAX_SIZE = 2048  # 最终纹理最大尺寸
+
 
 def process_texture_json(json_path):
     """处理JSON文件, 将TextureJsonURL替换为其对应json文件的内容"""
     with open(json_path, 'r') as f:
+
         data = json.load(f)
     
     def process_dict(d):
@@ -175,6 +178,7 @@ def ReQuantize(processed_images):
         coef_scale = img_data['coef_scale']
         coef_add = img_data['coef_add']
         
+
         # 更新每个通道coef_scale的最大最小值
         for i in range(4):
             s = coef_scale[i]
@@ -183,6 +187,7 @@ def ReQuantize(processed_images):
             max_c = a + s
             min_coef[i] = min(min_coef[i], min_c)
             max_coef[i] = max(max_coef[i], max_c)
+
     
     for i in range(4):
         scale[i] = max_coef[i] - min_coef[i]
@@ -297,19 +302,33 @@ def process_lightmaps(landscape_data, lightmap_folder, json_path):
     final_width = max_width * grid_size
     final_height = max_height * grid_size
     
-    # 创建一个数组来存储所有处理后的图片数据
-    processed_images = []
+    # 计算缩放比例，确保最终尺寸不超过2048x2048
+    scale = 1.0
+    if final_width > FINAL_TEXTURE_MAX_SIZE or final_height > FINAL_TEXTURE_MAX_SIZE:
+        scale = min(FINAL_TEXTURE_MAX_SIZE / final_width, FINAL_TEXTURE_MAX_SIZE / final_height)
+        max_width = int(max_width * scale)
+        max_height = int(max_height * scale)
+        final_width = max_width * grid_size
+        final_height = max_height * grid_size
+        print(f"图像尺寸超过限制，将按{scale:.2f}倍缩放")
     
     print(f"创建 {grid_size}x{grid_size} 的网格图像，大小为 {final_width}x{final_height}")
+    
+    # 创建一个数组来存储所有处理后的图片数据
+    processed_images = []
+    processed_images_direction = []
     
     for i, object_key in enumerate(object_keys):
         tile_data = lightmap_group[object_key]
         lq_name = tile_data['LQ']
         bias_scale = tile_data['BiasScale']
         
-        coef_scale = tile_data['CoefScale'][8:12]
-        coef_add = tile_data['CoefAdd'][8:12]
-        
+        coef_scale_light = tile_data['CoefScale'][8:12]
+        coef_add_light = tile_data['CoefAdd'][8:12]
+
+        coef_scale_direction = tile_data['CoefScale'][12:16]
+        coef_add_direction = tile_data['CoefAdd'][12:16]
+
         try:
             source_path = os.path.join(lightmap_folder, f"{lq_name}.tga")
             source_image = read_tga(source_path)
@@ -323,24 +342,40 @@ def process_lightmaps(landscape_data, lightmap_folder, json_path):
             x2 = int((1 * u_scale + u_offset) * source_width) - SHRINK_PIXELS
             y2 = int((1 * v_scale + v_offset) * 0.5 * source_height) - SHRINK_PIXELS
             
+            # 使用缩放后的尺寸
+            target_width = int(max_width)
+            target_height = int(max_height)
+            
             processed_array = direct_sample(source_image, x1, y1, x2, y2, 
-                                         max_width, max_height,
-                                         coef_scale, coef_add)
+                                         target_width, target_height,
+                                         coef_scale_light, coef_add_light)
+            
+            processed_array_direction = direct_sample(source_image, x1, y1 + 0.5 * source_height, x2, y2 + 0.5 * source_height, 
+                                         target_width, target_height,
+                                         coef_scale_direction, coef_add_direction)
             
             # 存储处理后的数组和位置信息
             grid_x = i % grid_size
             grid_y = i // grid_size
             paste_x = grid_x * max_width
             paste_y = grid_y * max_height
-            
+
             processed_images.append({
                 'array': processed_array,
                 'position': (paste_x, paste_y),
                 'name': lq_name,
-                'coef_scale': coef_scale,
-                'coef_add': coef_add
+                'coef_scale': coef_scale_light,
+                'coef_add': coef_add_light
             })
             
+
+            processed_images_direction.append({
+                'array': processed_array_direction,
+                'position': (paste_x, paste_y),
+                'name': lq_name,
+                'coef_scale': coef_scale_direction,
+                'coef_add': coef_add_direction
+            })
 
             print(f"处理进度: {i+1}/{total_objects} ({(i+1)/total_objects*100:.1f}%) - {lq_name}")
             
@@ -351,33 +386,44 @@ def process_lightmaps(landscape_data, lightmap_folder, json_path):
     print("所有图片处理完成，开始后处理...")
     
     # 这里可以对processed_images数组进行整体操作
-    # TODO: 在这里添加你的后处理代码
     processed_images, scale, add = ReQuantize(processed_images)
-    print("scale:", scale)
-    print("add:", add)
+    processed_images_direction, scale_direction, add_direction = ReQuantize(processed_images_direction)
+    print("光照图 scale:", scale)
+    print("光照图 add:", add)
+    print("法线图 scale:", scale_direction)
+    print("法线图 add:", add_direction)
     
-
-
-    # 将处理后的数组转换回图片
+    # 将处理后的数组转换回图片 - 光照图
     final_image = Image.new('RGBA', (final_width, final_height), (0, 0, 0, 0))
     for img_data in processed_images:
-        # 将浮点数数组转换为PIL图像
         array = img_data['array']
-        array = array.astype(np.uint8)  # 转换为uint8类型
+        array = array.astype(np.uint8)
         img = Image.fromarray(array, 'RGBA')
         final_image.paste(img, img_data['position'])
+    
+    # 将处理后的数组转换回图片 - 法线图
+    final_image_direction = Image.new('RGBA', (final_width, final_height), (0, 0, 0, 0))
+    for img_data in processed_images_direction:
+        array = img_data['array']
+        array = array.astype(np.uint8)
+        img = Image.fromarray(array, 'RGBA')
+        final_image_direction.paste(img, img_data['position'])
     
     # 保存最终图像
     output_name = f"{landscape_data['Name']}_combine_lightmap"
     output_path = os.path.join(lightmap_folder, f"{output_name}.tga")
     save_tga(output_path, final_image)
     
+    output_name_direction = f"{landscape_data['Name']}_combine_direction"
+    output_path_direction = os.path.join(lightmap_folder, f"{output_name_direction}.tga")
+    save_tga(output_path_direction, final_image_direction)
+    
     save_lightmap_data(json_path, landscape_data, output_name)
     
     print(f"已生成合并后的光照图: {output_path}")
+    print(f"已生成合并后的法线图: {output_path_direction}")
     total_end_time = time.time()
     print(f"程序总运行时间: {total_end_time - total_start_time:.2f}秒")
-
 def main():
     start_time = time.time()  # 记录程序开始时间
     
