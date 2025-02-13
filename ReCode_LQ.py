@@ -177,7 +177,6 @@ def ReQuantize(processed_images):
     for img_data in processed_images:
         coef_scale = img_data['coef_scale']
         coef_add = img_data['coef_add']
-        
 
         # 更新每个通道coef_scale的最大最小值
         for i in range(4):
@@ -187,7 +186,6 @@ def ReQuantize(processed_images):
             max_c = a + s
             min_coef[i] = min(min_coef[i], min_c)
             max_coef[i] = max(max_coef[i], max_c)
-
     
     for i in range(4):
         scale[i] = max_coef[i] - min_coef[i]
@@ -207,14 +205,47 @@ def ReQuantize(processed_images):
             image_data[i] = data
         img_data['array'] = image_data
 
-    # # 量化处理
-    # for img_data in processed_images:
-    #     data = img_data['array']
-    #     data = data * 255
-    #     data = np.clip(data, 0, 255)
-    #     img_data['array'] = data
     return (processed_images, scale, add)
 
+def reLighting(processed_images, coef_scale, coef_add):
+    for img_data in processed_images:
+        image_data = img_data['array']
+        for i in range(len(image_data)):
+            data = image_data[i]
+            for p in range(len(data)):
+                pixel = data[p]
+                
+                r = pixel[0] / 255.0
+                g = pixel[1] / 255.0
+                b = pixel[2] / 255.0
+                a = pixel[3] / 255.0
+                
+                r = r * coef_scale[0] + coef_add[0]
+                g = g * coef_scale[1] + coef_add[1]
+                b = b * coef_scale[2] + coef_add[2]
+                
+                log_l = 0.299 * r + 0.587 * g + 0.114 * b
+                log_l = max(log_l, 0.000001)
+                
+                log_black_point = 0.00390625
+                L = pow(2, log_l * 16 - 8) - log_black_point
+
+                scale = L / log_l
+                direction = 1
+                luma = L * direction
+
+                r = r * (luma / max(0.000001, log_l))
+                g = g * (luma / max(0.000001, log_l))
+                b = b * (luma / max(0.000001, log_l))
+                
+                r = np.clip(r * 255, 0, 255)
+                g = np.clip(g * 255, 0, 255)
+                b = np.clip(b * 255, 0, 255)
+                
+                data[p] = (r, g, b, a)
+            image_data[i] = data
+        img_data['array'] = image_data
+                    
 
 def direct_sample(source_image, x1, y1, x2, y2, target_width, target_height, coef_scale, coef_add):
     """使用PIL的线性采样方法处理图像，返回浮点数数组"""
@@ -223,7 +254,7 @@ def direct_sample(source_image, x1, y1, x2, y2, target_width, target_height, coe
     cropped = source_image.crop(crop_box)
     
     # 使用BILINEAR进行线性采样调整大小
-    resized = cropped.resize((target_width, target_height), Image.BILINEAR)
+    resized = cropped.resize((target_width, target_height), Image.LANCZOS)
     
     # 创建浮点数数组
     processed_array = np.zeros((target_height, target_width, 4), dtype=np.float32)
@@ -401,6 +432,10 @@ def process_lightmaps(landscape_data, lightmap_folder, json_path):
         img = Image.fromarray(array, 'RGBA')
         final_image.paste(img, img_data['position'])
     
+    # 左旋90度并左右翻转
+    final_image = final_image.rotate(-90, expand=True)
+    final_image = final_image.transpose(Image.FLIP_LEFT_RIGHT)
+    
     # 将处理后的数组转换回图片 - 法线图
     final_image_direction = Image.new('RGBA', (final_width, final_height), (0, 0, 0, 0))
     for img_data in processed_images_direction:
@@ -408,6 +443,10 @@ def process_lightmaps(landscape_data, lightmap_folder, json_path):
         array = array.astype(np.uint8)
         img = Image.fromarray(array, 'RGBA')
         final_image_direction.paste(img, img_data['position'])
+    
+    # 法线图也左旋90度并左右翻转
+    final_image_direction = final_image_direction.rotate(-90, expand=True)
+    final_image_direction = final_image_direction.transpose(Image.FLIP_LEFT_RIGHT)
     
     # 保存最终图像
     output_name = f"{landscape_data['Name']}_combine_lightmap"
