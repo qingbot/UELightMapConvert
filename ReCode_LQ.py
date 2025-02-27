@@ -6,6 +6,10 @@ from PIL import Image
 import math
 import shutil
 from datetime import datetime
+import copy
+import itertools
+from collections import defaultdict
+import traceback
 
 TextureSize = 2048
 
@@ -159,6 +163,619 @@ class LightmapPacker:
             return True, (positions, scale_factor)
         return False, None
 
+    def try_place_single_item(self, size, texture_idx, texture_data=None):
+        """尝试放置单个物体，确保不会与已有物体重叠"""
+        w, h = size
+        
+        # 高级策略：优先尝试已有区域的边缘位置
+        for pos, s in self.current_positions[texture_idx]:
+            # 检查右侧
+            x_right = pos[0] + s[0]
+            if x_right + w <= self.texture_size:
+                can_place = True
+                for p2, s2 in self.current_positions[texture_idx]:
+                    if p2 == pos:
+                        continue
+                    if (x_right < p2[0] + s2[0] and x_right + w > p2[0] and
+                        pos[1] < p2[1] + s2[1] and pos[1] + h > p2[1]):
+                        can_place = False
+                        break
+                if can_place:
+                    return (x_right, pos[1])
+            
+            # 检查底部
+            y_bottom = pos[1] + s[1]
+            if y_bottom + h <= self.texture_size:
+                can_place = True
+                for p2, s2 in self.current_positions[texture_idx]:
+                    if p2 == pos:
+                        continue
+                    if (pos[0] < p2[0] + s2[0] and pos[0] + w > p2[0] and
+                        y_bottom < p2[1] + s2[1] and y_bottom + h > p2[1]):
+                        can_place = False
+                        break
+                if can_place:
+                    return (pos[0], y_bottom)
+        
+        # 常规网格搜索 - 小步长（更精确但更慢）
+        step = max(1, min(w, h) // 10)  # 使用小步长，但不小于1
+        for y in range(0, self.texture_size - h + 1, step):
+            for x in range(0, self.texture_size - w + 1, step):
+                # 检查每个实际位置，而不仅仅是步长的位置
+                if x + w > self.texture_size or y + h > self.texture_size:
+                    continue
+                    
+                can_place = True
+                for pos, s in self.current_positions[texture_idx]:
+                    if (x < pos[0] + s[0] and x + w > pos[0] and
+                        y < pos[1] + s[1] and y + h > pos[1]):
+                        can_place = False
+                        break
+                
+                if can_place:
+                    # 额外验证：仔细检查像素级冲突
+                    mask = np.sum(self.current_textures[texture_idx][y:y+h, x:x+w, 3])
+                    if mask > 0:  # 如果有任何非零alpha值（表示已有内容）
+                        can_place = False
+                    
+                    if can_place:
+                        return (x, y)
+        
+        return None
+
+    def can_fit_group(self, group, scale=1.0, existing_only=False, specific_texture=None):
+        """检查一个组是否能放入现有纹理中
+        
+        Args:
+            group: 要放置的组
+            scale: 缩放比例
+            existing_only: 如果为True，只在现有纹理中寻找位置，不创建新的
+            specific_texture: 如果指定，则只在该特定纹理中寻找位置
+        
+        Returns:
+            tuple: (texture_idx, positions, scale, scaled_textures)
+        """
+        # 计算缩放后的尺寸
+        scaled_sizes = [(int(s[0] * scale), int(s[1] * scale)) for s in group['sizes']]
+        
+        # 计算组的总面积
+        total_group_area = sum(w * h for w, h in scaled_sizes)
+        
+        # 预处理缩放后的纹理
+        scaled_textures = []
+        for texture, size in zip(group['textures'], group['sizes']):
+            scaled_w = int(size[0] * scale)
+            scaled_h = int(size[1] * scale)
+            
+            # 确保最小尺寸
+            if scaled_w < 1 or scaled_h < 1:
+                continue
+            
+            # 创建缩放后的纹理
+            if scale != 1.0:
+                img = Image.fromarray(texture)
+                scaled_img = img.resize((scaled_w, scaled_h), Image.NEAREST)
+                scaled_textures.append(np.array(scaled_img))
+            else:
+                scaled_textures.append(texture)
+        
+        # 策略1：尝试所有现有纹理或特定纹理，优先选择剩余空间最多的
+        texture_scores = []
+        
+        if specific_texture is not None:
+            # 只检查特定的纹理
+            texture_indices = [specific_texture]
+        else:
+            # 检查所有现有纹理
+            texture_indices = range(len(self.current_textures))
+        
+        for texture_idx in texture_indices:
+            # 如果纹理剩余空间小于组总面积，直接跳过
+            if texture_idx < len(self.current_positions) and self.current_positions[texture_idx][0][1][0] < total_group_area:
+                continue
+            
+            # 尝试放置
+            positions = self.try_place_group_in_texture(scaled_sizes, texture_idx)
+            if positions:
+                # 计算放置后纹理的填充率
+                used_area = sum(self.current_positions[texture_idx][i][1][0] * self.current_positions[texture_idx][i][1][1] 
+                               for i in range(len(self.current_positions[texture_idx])))
+                used_area += total_group_area
+                fill_rate = used_area / (self.texture_size * self.texture_size)
+                
+                # 空间利用率越高越好
+                texture_scores.append((texture_idx, positions, fill_rate))
+        
+        # 如果有可行的放置方案，选择填充率最高的
+        if texture_scores:
+            best_score = max(texture_scores, key=lambda x: x[2])
+            return best_score[0], best_score[1], scale, scaled_textures
+        
+        # 策略2：尝试旋转物体
+        for texture_idx in texture_indices:
+            # 只有当纹理剩余空间大于组总面积时才尝试
+            if texture_idx < len(self.current_positions) and self.current_positions[texture_idx][0][1][0] < total_group_area:
+                continue
+            
+            # 尝试旋转放置
+            rotated_sizes = [(h, w) if h <= self.texture_size and w <= self.texture_size else (w, h) 
+                            for w, h in scaled_sizes]
+            positions = self.try_place_group_in_texture(rotated_sizes, texture_idx)
+            if positions:
+                # 旋转纹理数据
+                rotated_textures = []
+                for texture in scaled_textures:
+                    # 旋转90度
+                    rotated = np.rot90(texture)
+                    rotated_textures.append(rotated)
+                return texture_idx, positions, scale, rotated_textures
+        
+        # 如果指定了只使用现有纹理，到这里就结束了
+        if existing_only:
+            return None, None, scale, None
+        
+        # 策略3：如果当前缩放全部放不下且未指定特定纹理，尝试单独放置一些物体
+        if len(scaled_sizes) > 1 and specific_texture is None:
+            # 按面积从大到小排序
+            sorted_indices = sorted(range(len(scaled_sizes)), 
+                                     key=lambda i: scaled_sizes[i][0] * scaled_sizes[i][1], 
+                                     reverse=True)
+            
+            # 尝试将最大的几个物体放入现有纹理
+            for texture_idx in range(len(self.current_textures)):
+                for idx in sorted_indices:
+                    size = scaled_sizes[idx]
+                    pos = self.try_place_single_item(size, texture_idx)
+                    if pos:
+                        # 放入单个物体
+                        x, y = pos
+                        w, h = size
+                        
+                        # 验证位置是否真的有效（额外检查避免重叠）
+                        valid_position = True
+                        for used_pos, used_size in self.current_positions[texture_idx]:
+                            if (x < used_pos[0] + used_size[0] and x + w > used_pos[0] and
+                                y < used_pos[1] + used_size[1] and y + h > used_pos[1]):
+                                valid_position = False
+                                break
+                        
+                        if not valid_position:
+                            continue
+                        
+                        self.current_textures[texture_idx][y:y+h, x:x+w] = group['textures'][idx]
+                        self.current_positions[texture_idx].append(((x, y), (w, h)))
+                        self.current_positions[texture_idx][0][1][0] -= w * h
+                        
+                        # 从组中移除该物体
+                        new_group = copy.deepcopy(group)
+                        new_group['textures'].pop(idx)
+                        new_group['sizes'].pop(idx)
+                        new_group['infos'].pop(idx)
+                        
+                        # 递归处理剩余物体
+                        result = self.can_fit_group(new_group, scale)
+                        if result[0] is not None:
+                            # 成功放置剩余物体
+                            t_idx, positions, s, textures = result
+                            return t_idx, positions, s, textures
+        
+        # 策略4：如果现有纹理都放不下且没有指定特定纹理，创建新纹理
+        if specific_texture is None:
+            new_idx = self.add_texture(np.zeros((self.texture_size, self.texture_size, 4), dtype=np.uint8), (self.texture_size, self.texture_size))
+            positions = self.try_place_group_in_texture(scaled_sizes, new_idx)
+            if positions:
+                return new_idx, positions, scale, scaled_textures
+        
+        # 如果还放不下，返回失败
+        return None, None, scale, None
+
+    def try_place_group_in_texture(self, sizes, texture_idx):
+        """尝试在指定纹理中放置一组物体，确保不会重叠"""
+        # 创建一个占用图，标记已使用的区域
+        occupation_map = np.zeros((self.texture_size, self.texture_size), dtype=bool)
+        
+        # 标记现有的所有使用区域
+        for pos, size in self.current_positions[texture_idx]:
+            x, y = pos
+            w, h = size
+            occupation_map[y:y+h, x:x+w] = True
+        
+        # 按面积从大到小排序物体
+        sizes_with_index = [(i, size) for i, size in enumerate(sizes)]
+        sizes_with_index.sort(key=lambda x: x[1][0] * x[1][1], reverse=True)
+        
+        positions = [None] * len(sizes)
+        
+        # 尝试放置每个物体
+        for idx, (i, size) in enumerate(sizes_with_index):
+            w, h = size
+            pos = None
+            
+            # 优先寻找紧贴已有物体的位置
+            if idx > 0:  # 第一个物体直接放在(0,0)
+                for prev_idx in range(idx):
+                    prev_i = sizes_with_index[prev_idx][0]
+                    if positions[prev_i] is None:
+                        continue
+                    
+                    prev_x, prev_y = positions[prev_i]
+                    prev_w, prev_h = sizes[prev_i]
+                    
+                    # 尝试放在右侧
+                    x_right = prev_x + prev_w
+                    if x_right + w <= self.texture_size:
+                        if not np.any(occupation_map[prev_y:prev_y+h, x_right:x_right+w]):
+                            pos = (x_right, prev_y)
+                            break
+                    
+                    # 尝试放在底部
+                    y_bottom = prev_y + prev_h
+                    if y_bottom + h <= self.texture_size:
+                        if not np.any(occupation_map[y_bottom:y_bottom+h, prev_x:prev_x+w]):
+                            pos = (prev_x, y_bottom)
+                            break
+            
+            # 如果没找到紧贴的位置，按网格搜索
+            if pos is None:
+                # 更高效的网格搜索，从(0,0)开始
+                for y in range(0, self.texture_size - h + 1):
+                    for x in range(0, self.texture_size - w + 1):
+                        if not np.any(occupation_map[y:y+h, x:x+w]):
+                            pos = (x, y)
+                            break
+                    if pos:
+                        break
+            
+            if pos:
+                positions[i] = pos
+                x, y = pos
+                # 标记占用区域
+                occupation_map[y:y+h, x:x+w] = True
+            else:
+                # 如果任何一个物体放不下，整个放置失败
+                return None
+        
+        # 最终验证：确保所有位置都有效且不重叠
+        if None in positions:
+            return None
+            
+        # 验证没有重叠
+        for i, pos1 in enumerate(positions):
+            x1, y1 = pos1
+            w1, h1 = sizes[i]
+            for j, pos2 in enumerate(positions):
+                if i == j:
+                    continue
+                x2, y2 = pos2
+                w2, h2 = sizes[j]
+                if (x1 < x2 + w2 and x1 + w1 > x2 and
+                    y1 < y2 + h2 and y1 + h1 > y2):
+                    # 检测到重叠，返回失败
+                    return None
+        
+        return positions
+
+    def place_group(self, group, texture_idx, positions, scale, scaled_textures=None):
+        """将组放置到指定纹理，返回结果"""
+        group_results = []
+        
+        # 如果没有提供缩放后的纹理，需要先生成
+        if scaled_textures is None:
+            scaled_textures = []
+            for texture, size in zip(group['textures'], group['sizes']):
+                scaled_w = int(size[0] * scale)
+                scaled_h = int(size[1] * scale)
+                img = Image.fromarray(texture)
+                scaled_img = img.resize((scaled_w, scaled_h), Image.NEAREST)
+                scaled_textures.append(np.array(scaled_img))
+        
+        for i, (position, info) in enumerate(zip(positions, group['infos'])):
+            if position is None:  # 跳过没有成功放置的物体
+                continue
+                    
+            # 获取原始图像信息
+            lightmap_name = info["LQ"] if info["LQ"].endswith('.png') else f"{info['LQ']}.png"
+            lightmap_path = Path.joinpath(LightmapPath, lightmap_name)
+            
+            with Image.open(lightmap_path) as img:
+                source_width, source_height = img.size
+            
+            # 计算原始区域的像素尺寸
+            original_width = int(info["BiasScale"][2] * source_width)
+            original_height = int(info["BiasScale"][3] * source_height) * 0.5
+            
+            # 计算缩放后的尺寸
+            scaled_width = int(original_width * scale)
+            scaled_height = int(original_height * scale)
+            
+            # 获取缩放后的纹理
+            scaled_texture = scaled_textures[i]
+            
+            # 确保纹理尺寸与计算尺寸匹配
+            actual_h, actual_w = scaled_texture.shape[:2]
+            if actual_w != scaled_width or actual_h != scaled_height:
+                print(f"警告：实际纹理尺寸({actual_w}x{actual_h})与计算尺寸({scaled_width}x{scaled_height})不匹配")
+                # 使用实际的尺寸
+                scaled_width = actual_w
+                scaled_height = actual_h
+            
+            # 将纹理放入目标位置
+            x, y = position
+            
+            # 双重检查：确保目标区域是空的
+            target_region = self.current_textures[texture_idx][y:y+scaled_height, x:x+scaled_width]
+            if np.any(target_region[:,:,3] > 0):
+                print(f"警告：位置 ({x},{y}) 已经有内容，可能会导致覆盖！")
+            
+            try:
+                self.current_textures[texture_idx][y:y+scaled_height, x:x+scaled_width] = scaled_texture
+            except ValueError as e:
+                print(f"错误：无法将形状为 {scaled_texture.shape} 的纹理复制到形状为 [{y}:{y+scaled_height}, {x}:{x+scaled_width}] 的区域")
+                print(f"详细错误: {str(e)}")
+                continue
+            
+            # 记录已使用的位置
+            self.current_positions[texture_idx].append(((x, y), (scaled_width, scaled_height)))
+            # 更新剩余空间
+            self.current_positions[texture_idx][0][1][0] -= scaled_width * scaled_height
+            
+            # 计算新的BiasScale
+            new_bias_scale = [
+                x / self.texture_size,              # x起始位置比例
+                y / self.texture_size,             # y起始位置比例
+                scaled_width / self.texture_size,   # 宽度占比
+                scaled_height / self.texture_size  # 高度占比
+            ]
+            
+            # 添加到结果
+            result = {
+                "mesh_id": info["mesh_id"],
+                "Name": info["Name"],
+                "texture_index": texture_idx,
+                "new_lq": f"packed_lightmap_{texture_idx}",
+                "new_bias_scale": new_bias_scale,
+                "scale_factor": scale,
+                "position": (x, y),
+                "size": (scaled_width, scaled_height)
+            }
+            group_results.append(result)
+        
+        return group_results
+
+class GlobalRectPacker:
+    def __init__(self, width, height):
+        self.width = width
+        self.height = height
+        self.textures = []
+        self.used_positions = []  # 每个纹理的已用位置列表
+        self.texture_remaining_space = []  # 每个纹理的剩余空间
+        # 添加第一个纹理
+        self.add_texture()
+    
+    def add_texture(self):
+        """添加新纹理"""
+        self.textures.append(np.zeros((self.height, self.width, 4), dtype=np.uint8))
+        self.used_positions.append([])
+        self.texture_remaining_space.append(self.width * self.height)
+        return len(self.textures) - 1
+        
+    def can_fit_group(self, group, scale=1.0, existing_only=False, specific_texture=None):
+        """
+        尝试将一组纹理放入纹理中，同时考虑是否只检查现有纹理或特定纹理
+        
+        参数:
+            group: 需要放置的组
+            scale: 缩放比例，默认为1.0（不缩放）
+            existing_only: 是否只检查现有纹理，不创建新纹理
+            specific_texture: 指定尝试放入的特定纹理索引
+            
+        返回:
+            (texture_idx, positions, scale, scaled_textures): 成功时返回纹理索引、位置列表、缩放比例和缩放后的纹理
+            如果无法放入，则返回(None, None, scale, None)
+        """
+        # 获取组中的纹理和尺寸
+        textures = group['textures']
+        sizes = group['sizes']
+        
+        # 创建缩放后的尺寸和纹理
+        scaled_sizes = []
+        scaled_textures = []
+        
+        for i, (w, h) in enumerate(sizes):
+            # 确保最小尺寸
+            scaled_w = max(1, int(w * scale))
+            scaled_h = max(1, int(h * scale))
+            scaled_sizes.append((scaled_w, scaled_h))
+            
+            # 缩放纹理图像
+            if scale != 1.0:
+                texture = textures[i]
+                # 确保纹理是numpy数组
+                if not isinstance(texture, np.ndarray):
+                    texture = np.array(texture)
+                # 使用PIL进行缩放
+                img = Image.fromarray(texture)
+                scaled_img = img.resize((scaled_w, scaled_h), Image.NEAREST)
+                scaled_texture = np.array(scaled_img)
+                scaled_textures.append(scaled_texture)
+            else:
+                # 如果不缩放，直接使用原始纹理
+                scaled_textures.append(textures[i])
+        
+        # 如果指定了特定纹理，只尝试那个纹理
+        texture_indices = []
+        if specific_texture is not None:
+            texture_indices = [specific_texture]
+        else:
+            # 否则，按照剩余空间从大到小的顺序尝试所有现有纹理
+            texture_indices = sorted(range(len(self.textures)), 
+                                    key=lambda idx: self.texture_remaining_space[idx], 
+                                    reverse=True)
+        
+        # 尝试在现有纹理中放置
+        for texture_idx in texture_indices:
+            # 尝试在当前纹理中放置组
+            positions = self.try_place_group_in_texture(texture_idx, scaled_sizes)
+            if positions:
+                return texture_idx, positions, scale, scaled_textures
+        
+        # 如果要求只使用现有纹理或指定了特定纹理但失败，直接返回
+        if existing_only or specific_texture is not None:
+            return None, None, scale, None
+        
+        # 否则，创建新的纹理并尝试放置
+        new_texture_idx = self.add_texture()
+        positions = self.try_place_group_in_texture(new_texture_idx, scaled_sizes)
+        if positions:
+            return new_texture_idx, positions, scale, scaled_textures
+        
+        # 如果还是不行，返回失败
+        return None, None, scale, None
+    
+    def try_place_group_in_texture(self, texture_idx, sizes):
+        """尝试在指定纹理中放置一组物体，返回位置列表或None"""
+        # 创建占用图，标记已使用区域
+        occupation_map = np.zeros((self.height, self.width), dtype=bool)
+        
+        # 标记当前纹理的已用区域
+        for pos, size in self.used_positions[texture_idx]:
+            x, y = pos
+            w, h = size
+            occupation_map[y:y+h, x:x+w] = True
+        
+        # 按面积从大到小排序物体
+        sizes_with_index = [(i, size) for i, size in enumerate(sizes)]
+        sizes_with_index.sort(key=lambda x: x[1][0] * x[1][1], reverse=True)
+        
+        positions = [None] * len(sizes)
+        
+        # 尝试放置每个物体
+        for idx, (i, size) in enumerate(sizes_with_index):
+            w, h = size
+            pos = None
+            
+            # 尝试放置在左上角
+            if idx == 0 and not np.any(occupation_map[0:h, 0:w]):
+                pos = (0, 0)
+            else:
+                # 尝试紧贴已放置物体
+                for prev_idx in range(idx):
+                    prev_i = sizes_with_index[prev_idx][0]
+                    if positions[prev_i] is None:
+                        continue
+                    
+                    prev_x, prev_y = positions[prev_i]
+                    prev_w, prev_h = sizes[prev_i]
+                    
+                    # 尝试右侧放置
+                    x_right = prev_x + prev_w
+                    if x_right + w <= self.width and not np.any(occupation_map[prev_y:prev_y+h, x_right:x_right+w]):
+                        pos = (x_right, prev_y)
+                        break
+                    
+                    # 尝试下方放置
+                    y_bottom = prev_y + prev_h
+                    if y_bottom + h <= self.height and not np.any(occupation_map[y_bottom:y_bottom+h, prev_x:prev_x+w]):
+                        pos = (prev_x, y_bottom)
+                        break
+                
+                # 如果紧贴放置失败，尝试网格搜索
+                if pos is None:
+                    for y in range(0, self.height - h + 1):
+                        for x in range(0, self.width - w + 1):
+                            if not np.any(occupation_map[y:y+h, x:x+w]):
+                                pos = (x, y)
+                                break
+                        if pos:
+                            break
+            
+            if pos:
+                positions[i] = pos
+                x, y = pos
+                # 标记占用区域
+                occupation_map[y:y+h, x:x+w] = True
+            else:
+                # 一个物体放不下，整个放置失败
+                return None
+        
+        # 验证所有位置都有效
+        if None in positions:
+            return None
+        
+        return positions
+        
+    def place_group(self, group, texture_idx, positions, scale=1.0, scaled_textures=None):
+        """
+        将组放入指定纹理中的指定位置
+        
+        参数:
+            group: 要放置的组
+            texture_idx: 目标纹理索引
+            positions: 放置位置列表
+            scale: 缩放比例
+            scaled_textures: 预先缩放的纹理，如果为None则需要即时计算
+        """
+        if scaled_textures is None:
+            # 如果没有提供缩放纹理，需要计算
+            scaled_textures = []
+            for i, texture in enumerate(group['textures']):
+                w, h = group['sizes'][i]
+                scaled_w = max(1, int(w * scale))
+                scaled_h = max(1, int(h * scale))
+                
+                # 确保纹理是numpy数组
+                if not isinstance(texture, np.ndarray):
+                    texture = np.array(texture)
+                
+                # 使用PIL进行缩放
+                if scale != 1.0:
+                    img = Image.fromarray(texture)
+                    scaled_img = img.resize((scaled_w, scaled_h), Image.NEAREST)
+                    scaled_textures.append(np.array(scaled_img))
+                else:
+                    scaled_textures.append(texture)
+        
+        # 遍历每个物体进行放置
+        for i, info in enumerate(group['infos']):
+            if positions[i] is None:
+                # 跳过无法放置的物体
+                continue
+            
+            # 获取原始图像信息
+            texture = scaled_textures[i]
+            x, y = positions[i]
+            original_w, original_h = group['sizes'][i]
+            scaled_w = max(1, int(original_w * scale))
+            scaled_h = max(1, int(original_h * scale))
+            
+            # 检查目标尺寸是否匹配纹理尺寸
+            if texture.shape[0] != scaled_h or texture.shape[1] != scaled_w:
+                print(f"警告：纹理大小不匹配：预期 ({scaled_w}, {scaled_h})，"
+                      f"实际 ({texture.shape[1]}, {texture.shape[0]})")
+                # 调整纹理大小以匹配
+                img = Image.fromarray(texture)
+                img = img.resize((scaled_w, scaled_h), Image.NEAREST)
+                texture = np.array(img)
+            
+            # 验证目标区域是否为空或可以覆盖
+            target_region = self.textures[texture_idx][y:y+scaled_h, x:x+scaled_w]
+            if np.any(target_region[:, :, 3] > 0):
+                print(f"警告：目标区域 ({x}, {y}, {scaled_w}, {scaled_h}) 在纹理 {texture_idx} 中不为空")
+            
+            try:
+                # 复制纹理数据到目标区域
+                self.textures[texture_idx][y:y+scaled_h, x:x+scaled_w] = texture
+            except ValueError as e:
+                print(f"复制纹理时出错：{e}")
+                print(f"目标形状: {target_region.shape}, 源形状: {texture.shape}")
+                continue
+            
+            # 更新已使用的位置和剩余空间
+            self.used_positions[texture_idx].append((positions[i], (scaled_w, scaled_h)))
+            self.texture_remaining_space[texture_idx] -= scaled_w * scaled_h
+        
+        return True
+
 def load_json_data():
     with open(JsonPath, 'r', encoding='utf-8') as f:
         return json.load(f)
@@ -204,9 +821,16 @@ def group_by_parameters(json_data):
     
     return groups
 
-def pack_all_groups(groups):
-    """尝试将所有组打包到尽可能少的纹理中，确保每个组的所有物体都在同一个纹理中"""
-    # 按照总面积对组进行排序（面积大的先处理）
+def global_packing_optimization(groups):
+    """全局打包优化算法，考虑所有可能的组合以最大化空间利用率
+    
+    Args:
+        groups: 按组整理的数据字典
+    
+    Returns:
+        优化后的打包结果和纹理列表
+    """
+    # 首先获取所有组的信息
     sorted_groups = []
     for key, group_infos in groups.items():
         total_area = 0
@@ -226,311 +850,229 @@ def pack_all_groups(groups):
             'textures': textures,
             'sizes': sizes
         })
-    sorted_groups.sort(key=lambda x: x['area'], reverse=True)
 
-    # 结果列表
+    print(f"总共有 {len(sorted_groups)} 个组需要打包")
+
+    # 全局优化步骤1：评估每个组的特征
+    for group in sorted_groups:
+        # 计算组的宽高比和填充率
+        total_width = sum(size[0] for size in group['sizes'])
+        max_height = max(size[1] for size in group['sizes']) if group['sizes'] else 0
+        theoretical_area = total_width * max_height
+        group['aspect_ratio'] = total_width / max_height if max_height > 0 else 1
+        group['fill_rate'] = group['area'] / theoretical_area if theoretical_area > 0 else 1
+        # 计算最大尺寸
+        if group['sizes']:
+            max_dimensions = [max(size[0], size[1]) for size in group['sizes']]
+            group['max_dim'] = max(max_dimensions)
+        else:
+            group['max_dim'] = 0
+        
+        # 计算组内物体数量和平均大小
+        group['item_count'] = len(group['sizes'])
+        group['avg_size'] = group['area'] / group['item_count'] if group['item_count'] > 0 else 0
+        
+        print(f"组 {group['key']} 分析:")
+        print(f"  - 面积: {group['area']}")
+        print(f"  - 宽高比: {group['aspect_ratio']:.2f}")
+        print(f"  - 填充率: {group['fill_rate']:.2f}")
+        print(f"  - 物体数量: {group['item_count']}")
+        print(f"  - 平均大小: {group['avg_size']:.2f}")
+    
+    # 全局优化步骤2：聚类分析，将相似特征的组归为一类
+    def cluster_groups(groups_data, max_clusters=5):
+        # 简单聚类：按面积范围分组
+        if not groups_data:
+            return []
+        
+        # 按面积排序
+        sorted_by_area = sorted(groups_data, key=lambda x: x['area'])
+        
+        # 计算面积范围
+        min_area = sorted_by_area[0]['area']
+        max_area = sorted_by_area[-1]['area']
+        area_range = max_area - min_area
+        
+        # 根据组数量确定聚类数
+        actual_clusters = min(max_clusters, len(groups_data))
+        
+        # 分配到聚类
+        clusters = [[] for _ in range(actual_clusters)]
+        for i, group in enumerate(sorted_by_area):
+            cluster_idx = min(int((group['area'] - min_area) / (area_range + 1) * actual_clusters), actual_clusters - 1)
+            clusters[cluster_idx].append(group)
+        
+        # 过滤空聚类
+        return [c for c in clusters if c]
+    
+    # 将组聚类
+    clusters = cluster_groups(sorted_groups)
+    
+    print(f"\n将组分为 {len(clusters)} 个聚类")
+    for i, cluster in enumerate(clusters):
+        print(f"聚类 {i}: {len(cluster)} 个组")
+        for group in cluster:
+            print(f"  - 组 {group['key']}, 面积: {group['area']}")
+    
+    # 全局优化步骤3：组合优化 - 在每个聚类内尝试最佳组合
+    final_textures = []
+    final_assignments = {}  # 记录每个组分配到哪个纹理
     results = []
     
-    # 用于存储每个纹理的信息
-    textures = []  # 存储纹理图像数据
-    used_positions = []  # 存储每个纹理已使用的位置
+    # 创建全局打包器
+    packer = GlobalRectPacker(TextureSize, TextureSize)
     
-    # 记录组分配情况
-    group_assignments = {}  # 记录每个组被分配到的纹理
+    # 优化组的处理顺序 - 使用间插策略
+    # 1. 先按最大尺寸降序排序
+    sorted_by_max_dim = sorted(sorted_groups, key=lambda x: x['max_dim'], reverse=True)
     
-    # 按组处理物体
-    for group in sorted_groups:
-        print(f"\n开始处理组 {group['key']}...")
-        print(f"组内物体数量: {len(group['infos'])}")
+    # 2. 然后交替选择大的和小的组
+    optimized_order = []
+    while sorted_by_max_dim:
+        # 添加最大的
+        if sorted_by_max_dim:
+            optimized_order.append(sorted_by_max_dim.pop(0))
+        # 添加最小的
+        if sorted_by_max_dim:
+            optimized_order.append(sorted_by_max_dim.pop(-1))
+    
+    # 处理所有组
+    for group_idx, group in enumerate(optimized_order):
+        print(f"\n处理组 {group_idx+1}/{len(optimized_order)}: {group['key']}")
         
-        best_scale = 1.0
-        best_texture_index = None
-        best_positions = None
-        
-        # 新增：调试输出每个物体的尺寸
-        print("组内物体尺寸:")
-        for i, size in enumerate(group['sizes']):
-            print(f"  物体 {group['infos'][i]['Name']}: {size[0]}x{size[1]}")
-        
-        # 1. 尝试将整组放入已有的纹理中（不缩放）
-        for texture_index in range(len(textures)):
-            # 复制当前纹理的已用位置列表，用于临时测试
-            temp_used_positions = [pos for pos in used_positions[texture_index]]
-            positions = []
-            can_fit_all = True
-            
-            # 检查组内所有物体是否都能放入这个纹理
-            for i, (texture_array, size) in enumerate(zip(group['textures'], group['sizes'])):
-                can_fit, position = can_fit_in_texture(textures[texture_index], 
-                                                     temp_used_positions, 
-                                                     size)
-                if can_fit:
-                    positions.append(position)
-                    # 立即更新临时已用位置列表，确保后续物体不会与此位置重叠
-                    temp_used_positions.append(((position[0], position[1]), size))
-                    print(f"  物体 {group['infos'][i]['Name']} 可以放入纹理 {texture_index} 位置 {position}")
+        # 步骤1：首先尝试以原始尺寸（不缩放）放入现有纹理
+        texture_idx, positions, scale, scaled_textures = None, None, None, None
+        try:
+            try:
+                texture_idx, positions, scale, scaled_textures = packer.can_fit_group(group, 1.0, existing_only=True)
+                if positions:
+                    print(f"  成功放置到现有纹理 {texture_idx}，不缩放")
                 else:
-                    can_fit_all = False
-                    print(f"  物体 {group['infos'][i]['Name']} 无法放入纹理 {texture_index}")
-                    break
-            
-            if can_fit_all:
-                best_texture_index = texture_index
-                best_positions = positions
-                best_scale = 1.0
-                print(f"组 {group['key']} 完整放入现有纹理 {texture_index}")
-                break
-        
-        # 2. 如果无法放入现有纹理，创建新纹理
-        if best_texture_index is None:
-            # 创建新纹理
-            new_texture = np.zeros((TextureSize, TextureSize, 4), dtype=np.uint8)
-            textures.append(new_texture)
-            used_positions.append([])
-            texture_index = len(textures) - 1
-            print(f"为组 {group['key']} 创建新纹理 {texture_index}")
-            
-            # 复制新纹理的已用位置列表，用于临时测试
-            temp_used_positions = []
-            positions = []
-            can_fit_all = True
-            
-            # 检查是否能放入新纹理（不缩放）
-            for i, (texture_array, size) in enumerate(zip(group['textures'], group['sizes'])):
-                # 使用简单排列策略
-                if not temp_used_positions:  # 第一个物体放左上角
-                    position = (0, 0)
-                else:
-                    # 尝试沿着x轴排列
-                    last_pos, last_size = temp_used_positions[-1]
-                    next_x = last_pos[0] + last_size[0]
-                    if next_x + size[0] <= TextureSize:  # 当前行能放下
-                        position = (next_x, last_pos[1])
-                    else:  # 需要换行
-                        # 找当前行的最大高度
-                        max_height = 0
-                        for pos, sz in temp_used_positions:
-                            if pos[1] == last_pos[1]:  # 同一行
-                                max_height = max(max_height, sz[1])
-                        position = (0, last_pos[1] + max_height)
-                        # 检查是否超出高度限制
-                        if position[1] + size[1] > TextureSize:
-                            can_fit_all = False
-                            print(f"  物体 {group['infos'][i]['Name']} 放不下，超出纹理高度")
-                            break
-                
-                # 检查位置是否有效
-                if position[0] + size[0] > TextureSize or position[1] + size[1] > TextureSize:
-                    can_fit_all = False
-                    print(f"  物体 {group['infos'][i]['Name']} 放不下，超出纹理边界")
-                    break
-                
-                # 检查是否与已分配位置冲突
-                has_conflict = False
-                for pos, sz in temp_used_positions:
-                    if (position[0] < pos[0] + sz[0] and position[0] + size[0] > pos[0] and
-                        position[1] < pos[1] + sz[1] and position[1] + size[1] > pos[1]):
-                        has_conflict = True
-                        print(f"  物体 {group['infos'][i]['Name']} 与已分配位置冲突")
-                        break
-                
-                if has_conflict:
-                    can_fit_all = False
-                    break
-                
-                positions.append(position)
-                temp_used_positions.append((position, size))
-                print(f"  物体 {group['infos'][i]['Name']} 放置在位置 {position}")
-            
-            if can_fit_all:
-                best_texture_index = texture_index
-                best_positions = positions
-                best_scale = 1.0
-                print(f"组 {group['key']} 以原始尺寸放入新纹理 {texture_index}")
-            else:
-                # 3. 如果新纹理也放不下，尝试缩放整个组
-                # 尝试几种常用的缩放比例: 0.5, 0.25, 0.125...
-                for scale_factor in [0.5, 0.25, 0.125, 0.0625]:
-                    print(f"尝试以 {scale_factor} 比例缩放组 {group['key']}")
-                    
-                    # 计算缩放后的尺寸
-                    scaled_sizes = [(int(w * scale_factor), int(h * scale_factor)) 
-                                   for w, h in group['sizes']]
-                    
-                    # 验证最小尺寸
-                    if any(w < MinTextureSize or h < MinTextureSize for w, h in scaled_sizes):
-                        print(f"  比例 {scale_factor} 太小，会导致某些物体小于最小纹理尺寸 {MinTextureSize}")
-                        continue
-                    
-                    # 复位临时变量
-                    temp_used_positions = []
-                    positions = []
-                    can_fit_all = True
-                    
-                    # 使用同样的位置分配策略
-                    for i, scaled_size in enumerate(scaled_sizes):
-                        if not temp_used_positions:  # 第一个物体放左上角
-                            position = (0, 0)
-                        else:
-                            # 尝试沿着x轴排列
-                            last_pos, last_size = temp_used_positions[-1]
-                            next_x = last_pos[0] + last_size[0]
-                            if next_x + scaled_size[0] <= TextureSize:  # 当前行能放下
-                                position = (next_x, last_pos[1])
-                            else:  # 需要换行
-                                # 找当前行的最大高度
-                                max_height = 0
-                                for pos, sz in temp_used_positions:
-                                    if pos[1] == last_pos[1]:  # 同一行
-                                        max_height = max(max_height, sz[1])
-                                position = (0, last_pos[1] + max_height)
-                                # 检查是否超出高度限制
-                                if position[1] + scaled_size[1] > TextureSize:
-                                    can_fit_all = False
+                    # 步骤2：如果现有纹理放不下，创建新纹理并尝试原始尺寸
+                    new_texture_idx = packer.add_texture()
+                    texture_idx, positions, scale, scaled_textures = packer.can_fit_group(group, 1.0, existing_only=False, 
+                                                                                    specific_texture=new_texture_idx)
+                    if positions:
+                        print(f"  成功放置到新纹理 {new_texture_idx}，不缩放")
+                    else:
+                        # 步骤3：只有当新纹理也放不下时，才尝试缩放
+                        # 修改缩放因子序列，每次使用0.5的幂次方（即每次缩小一半）
+                        scale_factors = [0.5, 0.25, 0.125, 0.0625, 0.03125, 0.03125 * 0.5]
+                        for scale_factor in scale_factors:
+                            try:
+                                texture_idx, positions, scale, scaled_textures = packer.can_fit_group(
+                                    group, scale_factor, existing_only=False)
+                                if positions:
+                                    print(f"  成功放置到纹理 {texture_idx}，缩放比例: {scale_factor}")
                                     break
-                        
-                        # 检查位置是否有效
-                        if position[0] + scaled_size[0] > TextureSize or position[1] + scaled_size[1] > TextureSize:
-                            can_fit_all = False
-                            break
-                        
-                        positions.append(position)
-                        temp_used_positions.append((position, scaled_size))
-                        print(f"  物体 {group['infos'][i]['Name']} 缩放后放置在位置 {position}")
-                    
-                    if can_fit_all:
-                        best_texture_index = texture_index
-                        best_positions = positions
-                        best_scale = scale_factor
-                        print(f"组 {group['key']} 以 {scale_factor} 比例放入新纹理 {texture_index}")
-                        break
-        
-        # 如果找不到合适的位置，抛出异常
-        if best_texture_index is None:
-            raise Exception(f"无法处理组 {group['key']}, 即使在最小缩放比例下也无法容纳")
-        
-        # 更新纹理和已用位置信息
-        current_texture = textures[best_texture_index]
-        
-        # 将组放入选定的纹理
-        for i, (position, texture_array, size) in enumerate(zip(best_positions, group['textures'], group['sizes'])):
-            # 获取原始图像信息
-            info = group['infos'][i]
-            lightmap_name = info["LQ"] if info["LQ"].endswith('.png') else f"{info['LQ']}.png"
-            lightmap_path = Path.joinpath(LightmapPath, lightmap_name)
-            
-            with Image.open(lightmap_path) as img:
-                source_width, source_height = img.size
-            
-            # 计算原始区域的像素尺寸
-            original_width = int(info["BiasScale"][2] * source_width)
-            original_height = int(info["BiasScale"][3] * source_height) * 0.5
-            
-            # 计算缩放后的尺寸
-            scaled_width = int(original_width * best_scale)
-            scaled_height = int(original_height * best_scale)
-            
-            # 如果需要缩放，重新调整纹理
-            if best_scale < 1.0:
-                # 将原始纹理缩放到新尺寸
-                scaled_img = Image.fromarray(texture_array).resize((scaled_width, scaled_height), Image.NEAREST)
-                scaled_texture = np.array(scaled_img)
+                            except Exception as e:
+                                print(f"  尝试缩放比例 {scale_factor} 时出错：{e}")
+                                # 打印详细的异常信息
+                                print(traceback.format_exc())
+            except Exception as e:
+                print(f"  尝试放置组时出错：{e}")
+                # 打印详细的异常信息
+                print(traceback.format_exc())
+                
+            # 实际放置组
+            if texture_idx is not None and positions:
+                try:
+                    packer.place_group(group, texture_idx, positions, scale, scaled_textures)
+                    # 记录组分配到哪个纹理
+                    final_assignments[group['key']] = {
+                        'texture_idx': texture_idx,
+                        'scale': scale,
+                        'positions': positions
+                    }
+                    print(f"  成功将组 {group['key']} 放置到纹理 {texture_idx}")
+                except Exception as e:
+                    print(f"  放置组时出错：{e}")
+                    # 打印详细的异常信息
+                    print(traceback.format_exc())
+                    continue
             else:
-                scaled_texture = texture_array
-            
-            # 将纹理放入目标位置
-            x, y = position
-            # 确保不会超出边界
-            if y + scaled_height > TextureSize or x + scaled_width > TextureSize:
-                print(f"警告：物体 {info['Name']} 位置 ({x}, {y}) 加上尺寸 {scaled_width}x{scaled_height} 将超出纹理边界")
-                continue
-                
-            # 检查是否与已放置区域重叠
-            overlap = False
-            for (pos, sz) in used_positions[best_texture_index]:
-                if (x < pos[0] + sz[0] and x + scaled_width > pos[0] and
-                    y < pos[1] + sz[1] and y + scaled_height > pos[1]):
-                    overlap = True
-                    print(f"警告：物体 {info['Name']} 位置 ({x}, {y}) 与已放置区域重叠")
-                    break
-            
-            if overlap:
-                continue
-                
-            current_texture[y:y+scaled_height, x:x+scaled_width] = scaled_texture
-            # 记录已使用的位置
-            used_positions[best_texture_index].append(((x, y), (scaled_width, scaled_height)))
-            
-            # 计算新的BiasScale
-            new_bias_scale = [
-                x / TextureSize,              # x起始位置比例
-                y / TextureSize,              # y起始位置比例
-                scaled_width / TextureSize,   # 宽度占比
-                scaled_height / TextureSize   # 高度占比
-            ]
-            
-            # 添加到结果
-            results.append({
-                "mesh_id": info["mesh_id"],
-                "Name": info["Name"],
-                "texture_index": best_texture_index,
-                "new_lq": f"packed_lightmap_{best_texture_index}",
-                "new_bias_scale": new_bias_scale,
-                "scale_factor": best_scale,
-                "position": (x, y),
-                "size": (scaled_width, scaled_height)
-            })
-            
-            # 打印详细信息
-            print(f"物体 {info['Name']} 成功放置:")
-            print(f"  原始图像尺寸: {source_width}x{source_height}")
-            print(f"  缩放比例: {best_scale}")
-            print(f"  缩放后尺寸: {scaled_width}x{scaled_height}")
-            print(f"  在纹理 {best_texture_index} 中的位置: ({x}, {y})")
-            print(f"  新的BiasScale: {new_bias_scale}")
-        
-        # 记录该组被分配到的纹理
-        group_assignments[group['key']] = best_texture_index
+                print(f"警告：无法放置组 {group['key']}，尝试分割组或减小至更小的尺寸...")
+        except Exception as e:
+            print(f"  处理组时出错：{e}")
+            # 打印详细的异常信息
+            print(traceback.format_exc())
     
-    # 打印汇总信息
-    print("\n\n最终分配情况汇总:")
+    # 打印最终分配情况
+    print("\n最终分配情况汇总:")
     print("========================================")
-    texture_groups = {}
-    for group_key, texture_idx in group_assignments.items():
-        if texture_idx not in texture_groups:
-            texture_groups[texture_idx] = []
+    texture_groups = defaultdict(list)
+    for group_key, assignment_data in final_assignments.items():
+        texture_idx = assignment_data['texture_idx']
         texture_groups[texture_idx].append(group_key)
-        print(f"组 {group_key} -> 纹理 packed_lightmap_{texture_idx}")
     
-    print("\n每个纹理包含的组:")
     for texture_idx, group_keys in texture_groups.items():
         print(f"纹理 {texture_idx} 包含 {len(group_keys)} 个组:")
         for key in group_keys:
             print(f"  - {key}")
+    
+    # 统计纹理利用率
+    total_pixels = len(packer.textures) * TextureSize * TextureSize
+    used_pixels = 0
+    for texture_idx, positions in enumerate(packer.used_positions):
+        # 创建一个布尔掩码，标记每个像素是否被使用
+        usage_mask = np.zeros((TextureSize, TextureSize), dtype=bool)
+        
+        # 标记所有使用的像素
+        for pos, size in positions:
+            x, y = pos
+            w, h = size
+            usage_mask[y:y+h, x:x+w] = True
+        
+        # 计算真实使用的像素数量（避免重叠计算）
+        texture_used = np.sum(usage_mask)
+        efficiency = texture_used / (TextureSize * TextureSize) * 100
+        print(f"纹理 {texture_idx} 利用率: {efficiency:.2f}%")
+        used_pixels += texture_used
+    
+    overall_efficiency = used_pixels / total_pixels * 100
+    print(f"整体空间利用率: {overall_efficiency:.2f}%")
     print("========================================")
     
-    return results, textures
-
-# 辅助函数：检查纹理是否能放入指定位置
-def can_fit_in_texture(texture_data, used_positions, size):
-    texture_size = texture_data.shape[0]
-    
-    # 按行优先策略尝试放置
-    for y in range(0, texture_size - size[1] + 1, size[1]):
-        for x in range(0, texture_size - size[0] + 1, size[0]):
-            # 检查是否与已使用的区域重叠
-            can_place = True
-            for (pos, sz) in used_positions:
-                # 矩形重叠检测
-                if (x < pos[0] + sz[0] and x + size[0] > pos[0] and
-                    y < pos[1] + sz[1] and y + size[1] > pos[1]):
-                    can_place = False
-                    break
+    # 在函数结束前，将final_assignments转换为results格式
+    results = []
+    for group_key, assignment in final_assignments.items():
+        # 找到对应的组信息
+        group_info = None
+        for group in sorted_groups:
+            if group['key'] == group_key:
+                group_info = group
+                break
+        
+        if not group_info:
+            continue
             
-            if can_place:
-                return True, (x, y)
+        texture_idx = assignment['texture_idx']
+        scale = assignment['scale']
+        positions = assignment['positions']
+        
+        # 为组中的每个物体创建结果项
+        for i, info in enumerate(group_info['infos']):
+            if i >= len(positions) or positions[i] is None:
+                continue
+                
+            results.append({
+                "mesh_id": info["mesh_id"],
+                "Name": info["Name"],
+                "texture_index": texture_idx,
+                "new_lq": f"packed_lightmap_{texture_idx}",
+                "new_bias_scale": [
+                    positions[i][0] / TextureSize,
+                    positions[i][1] / TextureSize,
+                    group_info['sizes'][i][0] * scale / TextureSize,
+                    group_info['sizes'][i][1] * scale / TextureSize
+                ],
+                "scale_factor": scale,
+                "position": positions[i],
+                "size": (int(group_info['sizes'][i][0] * scale), 
+                         int(group_info['sizes'][i][1] * scale))
+            })
     
-    return False, None
+    return results, packer.textures
 
 def pack_lightmaps(json_data):
     # 确保BigLightmap文件夹存在
@@ -545,55 +1087,16 @@ def pack_lightmaps(json_data):
     groups = group_by_parameters(json_data)
     
     try:
-        # 尝试打包所有组
-        results, textures = pack_all_groups(groups)
+        # 使用全局优化算法打包
+        results, textures = global_packing_optimization(groups)
         
         print(f"\n总共生成了 {len(textures)} 个纹理")
         
-        # 保存所有生成的纹理，添加更多的验证信息
+        # 保存所有生成的纹理
         for i, texture_array in enumerate(textures):
             save_path = Path.joinpath(BigLightmapPath, f"packed_lightmap_{i}.png")
-            
-            # 检查纹理数组是否有效
-            if texture_array.shape[0] != TextureSize or texture_array.shape[1] != TextureSize:
-                print(f"警告：纹理 {i} 尺寸异常: {texture_array.shape}")
-            
-            # 检查纹理是否为空（全黑）
-            if np.sum(texture_array) == 0:
-                print(f"警告：纹理 {i} 可能是空的（全黑）")
-            
-            # 保存并验证
             Image.fromarray(texture_array).save(save_path)
-            if os.path.exists(save_path):
-                file_size = os.path.getsize(save_path)
-                print(f"保存纹理 {i} 成功，文件大小: {file_size/1024:.1f}KB")
-            else:
-                print(f"错误：纹理 {i} 保存失败！")
-        
-        # 验证所有文件是否都已创建
-        expected_files = [f"packed_lightmap_{i}.png" for i in range(len(textures))]
-        actual_files = [f.name for f in BigLightmapPath.glob("packed_lightmap_*.png")]
-        
-        print("\n文件验证:")
-        print(f"期望创建的文件数量: {len(expected_files)}")
-        print(f"实际创建的文件数量: {len(actual_files)}")
-        
-        missing_files = set(expected_files) - set(actual_files)
-        if missing_files:
-            print(f"警告：以下文件未成功创建: {missing_files}")
-        
-        # 打印结果详情以进行调试
-        texture_counts = {}
-        for result in results:
-            tex_idx = result["texture_index"]
-            if tex_idx not in texture_counts:
-                texture_counts[tex_idx] = 0
-            texture_counts[tex_idx] += 1
-            print(f"物体 {result['Name']} -> 纹理 {result['new_lq']} (索引: {tex_idx})")
-        
-        print("\n每个纹理的物体数量:")
-        for tex_idx, count in texture_counts.items():
-            print(f"纹理 {tex_idx}: {count} 个物体")
+            print(f"保存纹理 {i} 成功")
         
         return results
         
@@ -725,4 +1228,34 @@ def main():
         raise
 
 if __name__ == "__main__":
-    main()
+    # 先添加一个简单的测试
+    try:
+        # 创建一个测试组
+        test_group = {
+            'key': 'test_group',
+            'textures': [np.zeros((100, 100, 4), dtype=np.uint8)],
+            'sizes': [(100, 100)],
+            'infos': [{'id': 'test'}]
+        }
+        
+        # 创建打包器并测试
+        print("开始测试GlobalRectPacker类...")
+        test_packer = GlobalRectPacker(512, 512)
+        
+        # 测试can_fit_group方法
+        print("测试can_fit_group方法...")
+        texture_idx, positions, scale, scaled_textures = test_packer.can_fit_group(test_group)
+        print(f"返回值: texture_idx={texture_idx}, positions={positions}, scale={scale}")
+        
+        # 测试place_group方法
+        if texture_idx is not None and positions:
+            print("测试place_group方法...")
+            test_packer.place_group(test_group, texture_idx, positions, scale, scaled_textures)
+            print("place_group测试成功")
+        
+        print("GlobalRectPacker测试通过，继续执行主程序")
+        # 现在执行原始的主程序代码
+        main()
+    except Exception as e:
+        print(f"测试过程中发生错误: {e}")
+        traceback.print_exc()
