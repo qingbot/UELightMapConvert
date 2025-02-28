@@ -291,25 +291,6 @@ class LightmapPacker:
             best_score = max(texture_scores, key=lambda x: x[2])
             return best_score[0], best_score[1], scale, scaled_textures
         
-        # 策略2：尝试旋转物体
-        for texture_idx in texture_indices:
-            # 只有当纹理剩余空间大于组总面积时才尝试
-            if texture_idx < len(self.current_positions) and self.current_positions[texture_idx][0][1][0] < total_group_area:
-                continue
-            
-            # 尝试旋转放置
-            rotated_sizes = [(h, w) if h <= self.texture_size and w <= self.texture_size else (w, h) 
-                            for w, h in scaled_sizes]
-            positions = self.try_place_group_in_texture(rotated_sizes, texture_idx)
-            if positions:
-                # 旋转纹理数据
-                rotated_textures = []
-                for texture in scaled_textures:
-                    # 旋转90度
-                    rotated = np.rot90(texture)
-                    rotated_textures.append(rotated)
-                return texture_idx, positions, scale, rotated_textures
-        
         # 如果指定了只使用现有纹理，到这里就结束了
         if existing_only:
             return None, None, scale, None
