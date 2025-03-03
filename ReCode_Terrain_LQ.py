@@ -86,7 +86,7 @@ def save_lightmap_data(json_path, lightmap_data, combine_name):
         json.dump(data, f, indent='\t')
 
 def read_tga(image_path):
-    """使用PIL读取TGA文件，确保输出RGBA格式"""
+    """使用PIL读取TGA文件,确保输出RGBA格式"""
     try:
         img = Image.open(image_path)
         # 确保图像是RGBA格式
@@ -129,7 +129,7 @@ def decode_light_lq(pixel, coef_scale, coef_add):
     # 确保我们有4个通道的数据
     if len(pixel) == 3:
         r, g, b = pixel
-        a = 255  # 如果没有alpha通道，设置为255
+        a = 255  # 如果没有alpha通道,设置为255
     else:
         r, g, b, a = pixel
     
@@ -140,29 +140,6 @@ def decode_light_lq(pixel, coef_scale, coef_add):
     r = r * coef_scale[0] + coef_add[0]
     g = g * coef_scale[1] + coef_add[1]
     b = b * coef_scale[2] + coef_add[2]
-    
-    # # 计算亮度
-    # log_l = 0.299 * r + 0.587 * g + 0.114 * b
-    # log_l = max(log_l, 0.000001)  # 避免除零
-    
-    # # 调整亮度范围
-    # log_black_point = 0.00390625
-    # L = pow(2, log_l * 16 - 8) - log_black_point
-    
-    # # 应用亮度调整
-    # scale = L / log_l
-    # direction = 1
-    # luma = L * direction
-    
-    # # 调整RGB值
-    # r = r * (luma / max(0.000001, log_l))
-    # g = g * (luma / max(0.000001, log_l))
-    # b = b * (luma / max(0.000001, log_l))
-    
-    # # 转回0-255范围并限制在有效范围内
-    # r = min(max(int(r * 255), 0), 255)
-    # g = min(max(int(g * 255), 0), 255)
-    # b = min(max(int(b * 255), 0), 255)
     
     return (r, g, b, a)
 
@@ -248,7 +225,7 @@ def reLighting(processed_images, coef_scale, coef_add):
                     
 
 def direct_sample(source_image, x1, y1, x2, y2, target_width, target_height, coef_scale, coef_add):
-    """使用PIL的线性采样方法处理图像，返回浮点数数组"""
+    """使用PIL的线性采样方法处理图像,返回浮点数数组"""
     # 裁剪需要的区域
     crop_box = (x1, y1, x2, y2)
     cropped = source_image.crop(crop_box)
@@ -270,14 +247,14 @@ def direct_sample(source_image, x1, y1, x2, y2, target_width, target_height, coe
     return processed_array
 
 def save_landscape_json(lightmap_folder, landscape_data):
-    """保存Landscape.json文件，包含所有的coef_scale和coef_add"""
+    """保存Landscape.json文件,包含所有的coef_scale和coef_add"""
     coef_data = []
     
     # 获取所有物体的键
     lightmap_group = landscape_data['lightmapGroup']
     object_keys = [key for key in lightmap_group.keys() if key != 'combine']
     
-    # 遍历所有物体，收集coef数据
+    # 遍历所有物体,收集coef数据
     for object_key in object_keys:
         tile_data = lightmap_group[object_key]
         coef_scale = tile_data['CoefScale'][8:12]  # 只取需要的部分
@@ -333,7 +310,7 @@ def process_lightmaps(landscape_data, lightmap_folder, json_path):
     final_width = max_width * grid_size
     final_height = max_height * grid_size
     
-    # 计算缩放比例，确保最终尺寸不超过2048x2048
+    # 计算缩放比例,确保最终尺寸不超过2048x2048
     scale = 1.0
     if final_width > FINAL_TEXTURE_MAX_SIZE or final_height > FINAL_TEXTURE_MAX_SIZE:
         scale = min(FINAL_TEXTURE_MAX_SIZE / final_width, FINAL_TEXTURE_MAX_SIZE / final_height)
@@ -341,9 +318,9 @@ def process_lightmaps(landscape_data, lightmap_folder, json_path):
         max_height = int(max_height * scale)
         final_width = max_width * grid_size
         final_height = max_height * grid_size
-        print(f"图像尺寸超过限制，将按{scale:.2f}倍缩放")
+        print(f"图像尺寸超过限制,将按{scale:.2f}倍缩放")
     
-    print(f"创建 {grid_size}x{grid_size} 的网格图像，大小为 {final_width}x{final_height}")
+    print(f"创建 {grid_size}x{grid_size} 的网格图像,大小为 {final_width}x{final_height}")
     
     # 创建一个数组来存储所有处理后的图片数据
     processed_images = []
@@ -414,15 +391,15 @@ def process_lightmaps(landscape_data, lightmap_folder, json_path):
             traceback.print_exc()
             print(f"处理贴图 {lq_name} 时出错: {str(e)}")
     
-    print("所有图片处理完成，开始后处理...")
+    print("所有图片处理完成,开始后处理...")
     
     # 这里可以对processed_images数组进行整体操作
     processed_images, scale, add = ReQuantize(processed_images)
     processed_images_direction, scale_direction, add_direction = ReQuantize(processed_images_direction)
     print("光照图 scale:", scale)
     print("光照图 add:", add)
-    print("法线图 scale:", scale_direction)
-    print("法线图 add:", add_direction)
+    print("方向图 scale:", scale_direction)
+    print("方向图 add:", add_direction)
     
     # 将处理后的数组转换回图片 - 光照图
     final_image = Image.new('RGBA', (final_width, final_height), (0, 0, 0, 0))
@@ -436,7 +413,7 @@ def process_lightmaps(landscape_data, lightmap_folder, json_path):
     final_image = final_image.rotate(-90, expand=True)
     final_image = final_image.transpose(Image.FLIP_LEFT_RIGHT)
     
-    # 将处理后的数组转换回图片 - 法线图
+    # 将处理后的数组转换回图片 - 方向图
     final_image_direction = Image.new('RGBA', (final_width, final_height), (0, 0, 0, 0))
     for img_data in processed_images_direction:
         array = img_data['array']
@@ -444,7 +421,7 @@ def process_lightmaps(landscape_data, lightmap_folder, json_path):
         img = Image.fromarray(array, 'RGBA')
         final_image_direction.paste(img, img_data['position'])
     
-    # 法线图也左旋90度并左右翻转
+    # 方向图也左旋90度并左右翻转
     final_image_direction = final_image_direction.rotate(-90, expand=True)
     final_image_direction = final_image_direction.transpose(Image.FLIP_LEFT_RIGHT)
     
@@ -460,7 +437,7 @@ def process_lightmaps(landscape_data, lightmap_folder, json_path):
     save_lightmap_data(json_path, landscape_data, output_name)
     
     print(f"已生成合并后的光照图: {output_path}")
-    print(f"已生成合并后的法线图: {output_path_direction}")
+    print(f"已生成合并后的方向图: {output_path_direction}")
     total_end_time = time.time()
     print(f"程序总运行时间: {total_end_time - total_start_time:.2f}秒")
 def main():

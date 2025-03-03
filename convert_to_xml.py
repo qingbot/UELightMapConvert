@@ -15,22 +15,22 @@ def generate_sketum_id():
     return str(uuid.uuid4()).replace('-', '').upper()[:16]
 
 def format_float(value):
-    """格式化浮点数，保持最大精度"""
+    """格式化浮点数，保持最大精度""" 
     # 使用科学计数法并保留17位有效数字（Python float的最大精度）
     return f"{value:.17g}"
-
+                        
 def create_coef_element(parent, coef_data):
-    """创建一个系数元素"""
-    # 创建主element节点
+    """创建一个系数元素"""      
+    # 创建主element节点      
     element = ET.SubElement(parent, "element", {"sketum_id": generate_sketum_id()})
-    
-    # 创建CoefAdd节点
+                        
+    # 创建CoefAdd节点       
     coef_add = ET.SubElement(element, "CoefAdd")
     for value in coef_data['coef_add']:
         add_element = ET.SubElement(coef_add, "element", {"sketum_id": generate_sketum_id()})
         add_element.text = format_float(value)
-    
-    # 创建CoefScale节点
+                        
+    # 创建CoefScale节点     
     coef_scale = ET.SubElement(element, "CoefScale")
     for value in coef_data['coef_scale']:
         scale_element = ET.SubElement(coef_scale, "element", {"sketum_id": generate_sketum_id()})
