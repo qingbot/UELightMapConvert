@@ -1026,9 +1026,17 @@ def pack_lightmaps(json_data):
         
         # 保存所有生成的纹理
         for i, texture_array in enumerate(textures):
+            # 保存完整的纹理
             save_path = Path.joinpath(BigLightmapPath, f"packed_lightmap_{i}.png")
             Image.fromarray(texture_array).save(save_path)
-            print(f"保存纹理 {i} 成功")
+            
+            # 提取alpha通道并单独保存
+            alpha_channel = texture_array[:, :, 3]  # 获取alpha通道
+            alpha_image = Image.fromarray(alpha_channel, mode='L')  # 创建单通道图像
+            alpha_save_path = Path.joinpath(BigLightmapPath, f"packed_lightmap_{i}_skyao.png")
+            alpha_image.save(alpha_save_path)
+            
+            print(f"保存纹理 {i} 成功，同时已保存其alpha通道到 {alpha_save_path.name}")
         
         return results
         
