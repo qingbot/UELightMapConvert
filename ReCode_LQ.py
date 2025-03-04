@@ -224,34 +224,102 @@ class LightmapPacker:
         return None
 
     def can_fit_group(self, group, scale=1.0, existing_only=False, specific_texture=None):
-        """检查一个组是否能放入现有纹理中
+        """尝试将一组纹理放入纹理中,优先保持原始分辨率
         
-        Args:
-            group: 要放置的组
-            scale: 缩放比例
-            existing_only: 如果为True,只在现有纹理中寻找位置,不创建新的
-            specific_texture: 如果指定,则只在该特定纹理中寻找位置
-        
-        Returns:
-            tuple: (texture_idx, positions, scale, scaled_textures)
+        参数:
+            group: 需要放置的组
+            scale: 初始缩放比例
+            existing_only: 是否只检查现有纹理
+            specific_texture: 指定尝试放入的特定纹理索引
         """
-        # 计算缩放后的尺寸
-        scaled_sizes = [(int(s[0] * scale), int(s[1] * scale)) for s in group['sizes']]
+        # 获取组信息
+        textures = group['textures']
+        sizes = group['sizes']
         
-        # 计算组的总面积
-        total_group_area = sum(w * h for w, h in scaled_sizes)
+        # 缩放因子序列（从大到小）
+        scale_factors = [1.0, 0.5, 0.25, 0.125, 0.0625]
         
-        # 预处理缩放后的纹理
-        scaled_textures = []
-        for texture, size in zip(group['textures'], group['sizes']):
-            scaled_w = int(size[0] * scale)
-            scaled_h = int(size[1] * scale)
+        # 如果指定了特定纹理,只尝试那个纹理
+        if specific_texture is not None:
+            existing_textures = [specific_texture]
+        else:
+            # 尝试所有现有纹理
+            existing_textures = list(range(len(self.current_textures)))
+        
+        # 第一步：尝试以原始分辨率放入现有纹理
+        current_scale = scale
+        scaled_sizes = [(int(w * current_scale), int(h * current_scale)) for w, h in sizes]
+        scaled_textures = self.get_scaled_textures(group, current_scale)
+        
+        for texture_idx in existing_textures:
+            positions = self.try_place_group_in_texture(texture_idx, scaled_sizes)
+            if positions:
+                print(f"以原始分辨率放入现有纹理 {texture_idx}")
+                return texture_idx, positions, current_scale, scaled_textures
+        
+        # 如果要求只使用现有纹理,在这里返回
+        if existing_only:
+            return None, None, scale, None
+        
+        # 第二步：如果无法放入现有纹理,尝试创建新纹理（仍然使用原始分辨率）
+        if specific_texture is None:
+            new_texture_idx = len(self.current_textures)
+            self.add_new_texture()
+            positions = self.try_place_group_in_texture(new_texture_idx, scaled_sizes)
+            if positions:
+                print(f"以原始分辨率放入新纹理 {new_texture_idx}")
+                return new_texture_idx, positions, current_scale, scaled_textures
+        
+        # 第三步：如果新纹理也放不下,开始缩小分辨率
+        for scale_factor in scale_factors[1:]:  # 跳过1.0,因为已经试过了
+            current_scale = scale_factor
+            scaled_sizes = [(int(w * current_scale), int(h * current_scale)) for w, h in sizes]
+            scaled_textures = self.get_scaled_textures(group, current_scale)
             
-            # 确保最小尺寸
-            if scaled_w < 1 or scaled_h < 1:
+            # 检查最小尺寸限制
+            if any(w < 1 or h < 1 for w, h in scaled_sizes):
+                print(f"缩放比例 {current_scale} 导致某些纹理小于1像素,跳过")
                 continue
             
-            # 创建缩放后的纹理
+            print(f"尝试缩放比例 {current_scale}")
+            
+            # 先检查是否能放入现有纹理（回头检查）
+            for texture_idx in existing_textures:
+                positions = self.try_place_group_in_texture(texture_idx, scaled_sizes)
+                if positions:
+                    print(f"缩小到 {current_scale} 后成功放入现有纹理 {texture_idx}")
+                    return texture_idx, positions, current_scale, scaled_textures
+            
+            # 如果现有纹理都放不下,尝试放入新纹理
+            if specific_texture is None:
+                # 注意：我们可能已经添加了一个新纹理,所以需要确认索引
+                new_texture_idx = len(self.current_textures) - 1
+                if new_texture_idx < 0:
+                    new_texture_idx = self.add_new_texture()
+                
+                positions = self.try_place_group_in_texture(new_texture_idx, scaled_sizes)
+                if positions:
+                    print(f"缩小到 {current_scale} 后放入新纹理 {new_texture_idx}")
+                    return new_texture_idx, positions, current_scale, scaled_textures
+                
+                # 如果第一张新纹理都放不下,可能需要再创建一张新纹理试试
+                new_texture_idx = self.add_new_texture()
+                positions = self.try_place_group_in_texture(new_texture_idx, scaled_sizes)
+                if positions:
+                    print(f"缩小到 {current_scale} 后放入另一张新纹理 {new_texture_idx}")
+                    return new_texture_idx, positions, current_scale, scaled_textures
+        
+        # 如果所有尝试都失败,返回失败
+        return None, None, scale, None
+
+    def get_scaled_textures(self, group, scale):
+        """获取缩放后的纹理列表"""
+        scaled_textures = []
+        for i, texture in enumerate(group['textures']):
+            w, h = group['sizes'][i]
+            scaled_w = max(1, int(w * scale))
+            scaled_h = max(1, int(h * scale))
+            
             if scale != 1.0:
                 img = Image.fromarray(texture)
                 scaled_img = img.resize((scaled_w, scaled_h), Image.NEAREST)
@@ -259,98 +327,9 @@ class LightmapPacker:
             else:
                 scaled_textures.append(texture)
         
-        # 策略1:尝试所有现有纹理或特定纹理,优先选择剩余空间最多的
-        texture_scores = []
-        
-        if specific_texture is not None:
-            # 只检查特定的纹理
-            texture_indices = [specific_texture]
-        else:
-            # 检查所有现有纹理
-            texture_indices = range(len(self.current_textures))
-        
-        for texture_idx in texture_indices:
-            # 如果纹理剩余空间小于组总面积,直接跳过
-            if texture_idx < len(self.current_positions) and self.current_positions[texture_idx][0][1][0] < total_group_area:
-                continue
-            
-            # 尝试放置
-            positions = self.try_place_group_in_texture(scaled_sizes, texture_idx)
-            if positions:
-                # 计算放置后纹理的填充率
-                used_area = sum(self.current_positions[texture_idx][i][1][0] * self.current_positions[texture_idx][i][1][1] 
-                               for i in range(len(self.current_positions[texture_idx])))
-                used_area += total_group_area
-                fill_rate = used_area / (self.texture_size * self.texture_size)
-                
-                # 空间利用率越高越好
-                texture_scores.append((texture_idx, positions, fill_rate))
-        
-        # 如果有可行的放置方案,选择填充率最高的
-        if texture_scores:
-            best_score = max(texture_scores, key=lambda x: x[2])
-            return best_score[0], best_score[1], scale, scaled_textures
-        
-        # 如果指定了只使用现有纹理,到这里就结束了
-        if existing_only:
-            return None, None, scale, None
-        
-        # 策略3:如果当前缩放全部放不下且未指定特定纹理,尝试单独放置一些物体
-        if len(scaled_sizes) > 1 and specific_texture is None:
-            # 按面积从大到小排序
-            sorted_indices = sorted(range(len(scaled_sizes)), 
-                                     key=lambda i: scaled_sizes[i][0] * scaled_sizes[i][1], 
-                                     reverse=True)
-            
-            # 尝试将最大的几个物体放入现有纹理
-            for texture_idx in range(len(self.current_textures)):
-                for idx in sorted_indices:
-                    size = scaled_sizes[idx]
-                    pos = self.try_place_single_item(size, texture_idx)
-                    if pos:
-                        # 放入单个物体
-                        x, y = pos
-                        w, h = size
-                        
-                        # 验证位置是否真的有效（额外检查避免重叠）
-                        valid_position = True
-                        for used_pos, used_size in self.current_positions[texture_idx]:
-                            if (x < used_pos[0] + used_size[0] and x + w > used_pos[0] and
-                                y < used_pos[1] + used_size[1] and y + h > used_pos[1]):
-                                valid_position = False
-                                break
-                        
-                        if not valid_position:
-                            continue
-                        
-                        self.current_textures[texture_idx][y:y+h, x:x+w] = group['textures'][idx]
-                        self.current_positions[texture_idx].append(((x, y), (w, h)))
-                        self.current_positions[texture_idx][0][1][0] -= w * h
-                        
-                        # 从组中移除该物体
-                        new_group = copy.deepcopy(group)
-                        new_group['textures'].pop(idx)
-                        new_group['sizes'].pop(idx)
-                        new_group['infos'].pop(idx)
-                        
-                        # 递归处理剩余物体
-                        result = self.can_fit_group(new_group, scale)
-                        if result[0] is not None:
-                            # 成功放置剩余物体
-                            t_idx, positions, s, textures = result
-                            return t_idx, positions, s, textures
-        
-        # 策略4:如果现有纹理都放不下且没有指定特定纹理,创建新纹理
-        if specific_texture is None:
-            new_idx = self.add_texture(np.zeros((self.texture_size, self.texture_size, 4), dtype=np.uint8), (self.texture_size, self.texture_size))
-            positions = self.try_place_group_in_texture(scaled_sizes, new_idx)
-            if positions:
-                return new_idx, positions, scale, scaled_textures
-        
-        # 如果还放不下,返回失败
-        return None, None, scale, None
+        return scaled_textures
 
-    def try_place_group_in_texture(self, sizes, texture_idx):
+    def try_place_group_in_texture(self, texture_idx, sizes):
         """尝试在指定纹理中放置一组物体,确保不会重叠"""
         # 创建一个占用图,标记已使用的区域
         occupation_map = np.zeros((self.texture_size, self.texture_size), dtype=bool)
@@ -372,8 +351,11 @@ class LightmapPacker:
             w, h = size
             pos = None
             
-            # 优先寻找紧贴已有物体的位置
-            if idx > 0:  # 第一个物体直接放在(0,0)
+            # 尝试放置在左上角
+            if idx == 0 and not np.any(occupation_map[0:h, 0:w]):
+                pos = (0, 0)
+            else:
+                # 尝试紧贴已放置物体
                 for prev_idx in range(idx):
                     prev_i = sizes_with_index[prev_idx][0]
                     if positions[prev_i] is None:
@@ -382,14 +364,14 @@ class LightmapPacker:
                     prev_x, prev_y = positions[prev_i]
                     prev_w, prev_h = sizes[prev_i]
                     
-                    # 尝试放在右侧
+                    # 尝试右侧放置
                     x_right = prev_x + prev_w
                     if x_right + w <= self.texture_size:
                         if not np.any(occupation_map[prev_y:prev_y+h, x_right:x_right+w]):
                             pos = (x_right, prev_y)
                             break
                     
-                    # 尝试放在底部
+                    # 尝试下方放置
                     y_bottom = prev_y + prev_h
                     if y_bottom + h <= self.texture_size:
                         if not np.any(occupation_map[y_bottom:y_bottom+h, prev_x:prev_x+w]):
