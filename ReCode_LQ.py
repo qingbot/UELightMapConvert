@@ -1298,19 +1298,10 @@ def find_global_optimal_solution(groups):
         print(f"组 {key} 的最佳缩放比例: {optimal_scale}")
         group_list.append(group)
     
-    # 如果组的数量太多，限制排列组合的数量
-    if len(group_list) > 8:
-        print(f"组数量 ({len(group_list)}) 过多，使用启发式排序而非穷举所有组合")
-        # 按面积从大到小排序
-        group_list.sort(key=lambda g: g['area'], reverse=True)
-        # 只保留前8个最大的组
-        if len(group_list) > 8:
-            limited_groups = group_list[:8]
-            print(f"限制计算到前 8 个最大的组")
-        else:
-            limited_groups = group_list
-    else:
-        limited_groups = group_list
+    # 取消组数量限制，因为已经有了高效的剪枝策略
+    # 按面积从大到小排序以提高效率
+    group_list.sort(key=lambda g: g['area'], reverse=True)
+    limited_groups = group_list
     
     # 步骤2：尝试不同的组合
     best_utilization = 0
@@ -1502,6 +1493,61 @@ def find_global_optimal_solution(groups):
                 
                 else:
                     print(f"警告: 组 {group['key']} 即使使用其最佳缩放比例 {scale} 也无法放入新纹理")
+            
+            # 添加新的剪枝条件：检查剩余空间是否足够放置剩余组中的任何一个
+            # 这只在我们已经处理了部分组后才有必要检查
+            if len(assignments) > 0 and len(assignments) < len(group_order):
+                # 获取还未放置的组
+                placed_keys = set(assignments.keys())
+                remaining_groups = [g for g in group_order if g['key'] not in placed_keys]
+                
+                # 获取当前纹理的最大剩余连续空间
+                max_remaining_space = 0
+                largest_empty_region = None
+                for texture_idx in range(len(packer.textures)):
+                    # 创建当前纹理的占用图
+                    occupation_map = np.zeros((TextureSize, TextureSize), dtype=bool)
+                    for pos, size in packer.used_positions[texture_idx]:
+                        x, y = pos
+                        w, h = size
+                        occupation_map[y:y+h, x:x+w] = True
+                    
+                    # 使用空区域索引找到最大连续空间
+                    empty_regions = packer._build_empty_regions_index(occupation_map)
+                    for region in empty_regions:
+                        x, y, w, h = region
+                        region_area = w * h
+                        if region_area > max_remaining_space:
+                            max_remaining_space = region_area
+                            largest_empty_region = (w, h)
+                
+                if largest_empty_region is None:
+                    # 如果没有空区域，直接剪枝
+                    print(f"剪枝：组合中所有纹理已完全填满")
+                    continue
+                
+                max_width, max_height = largest_empty_region
+                
+                # 检查任何剩余组中最小的物体是否能放入
+                can_place_any = False
+                for group in remaining_groups:
+                    # 检查该组中是否有物体能放入当前最大空区域
+                    for w, h in group['sizes']:
+                        scaled_w = max(1, int(w * group['optimal_scale']))
+                        scaled_h = max(1, int(h * group['optimal_scale']))
+                        
+                        # 检查物体是否能放入空区域（考虑宽高，不仅仅是面积）
+                        if scaled_w <= max_width and scaled_h <= max_height:  # 物体不能旋转
+                            can_place_any = True
+                            break
+                    
+                    if can_place_any:
+                        break
+                
+                # 如果没有剩余组能放入，则剪枝
+                if not can_place_any:
+                    print(f"剪枝：组合 {[g['key'] for g in group_order]} 的剩余空间不足以放置任何剩余物体")
+                    continue
         
         # 计算当前组合的空间利用率
         total_pixels = len(packer.textures) * TextureSize * TextureSize
