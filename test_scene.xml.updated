@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<scene xmlns="http://www.boominggames.com" version="1.0">
+  <element sketum_id="C36H1Q09ASSF1WYN" type="StaticObjectInstanceData">
+    <guid>C36HWL00ASSF3WKU</guid>
+    <name>SM_Cube5</name>
+    <transform>
+      <position>1000.000000 1000.000000 250.000000</position>
+      <rotation>0.000000 0.000000 0.000000 1.000000</rotation>
+      <scale>33.000000 1.000000 10.500000</scale>
+    </transform>
+    <added_components>
+      <element sketum_id="86057D095A824923" type="LightMapComponentDefinition"><group>default</group><HQ><url>_project/New Folder1/lightMaps/HQ_Lightmap0_20.texture.ast</url><guid /><parameter><parameters /></parameter></HQ><LQ><url>_project/New Folder1/lightMaps/packed_lightmap_0.texture.ast</url><guid /><parameter><parameters /></parameter></LQ><BiasScale>0.124512 0 0.124512 0.124512</BiasScale><CoefAdd><element sketum_id="622F187A49FF4A80">1</element><element sketum_id="6CA830BC8C2B4133">0.80599399999999999</element><element sketum_id="2F0298F6C7654CFD">0.56503999999999999</element><element sketum_id="01FA38595C6A4F14">-5.75</element><element sketum_id="2958D20320A44A53">-0.38889499999999999</element><element sketum_id="0A0290DB3A034E86">-0.34920000000000001</element><element sketum_id="59A75B112F344FE2">-0.44710699999999998</element><element sketum_id="3E01141CC3CA4F60">0.28209499999999998</element><element sketum_id="C03A90381BE148EC">0.01</element><element sketum_id="97BCFA370812444D">0.01</element><element sketum_id="B257B7B4E1B54B05">0.01</element><element sketum_id="DFC931DAF71149BB">0</element><element sketum_id="7B7834287ED94241">-0.38889499999999999</element><element sketum_id="11832DAFA5BB4489">-0.34920000000000001</element><element sketum_id="C6F68F455EEB4645">-0.44710699999999998</element><element sketum_id="3FB3A1ADB7204C6D">0.28209499999999998</element></CoefAdd><CoefScale><element sketum_id="0521285E9AF7430C">0.50442100000000001</element><element sketum_id="3E388B733A974D29">0.19400600000000001</element><element sketum_id="628B6432D26F43BE">0.43496000000000001</element><element sketum_id="E917667C41F64604">6.2151529999999999</element><element sketum_id="4C28D7824C574DA6">0.799512</element><element sketum_id="5F8EE58CD55848B6">0.66193900000000006</element><element sketum_id="8D9D4FF9336145E9">0.97794899999999996</element><element sketum_id="1FC45A353EEF42CD">0</element><element sketum_id="76BBA517A2884642">0.61235700000000004</element><element sketum_id="5C4BDA3D02134846">0.50396099999999999</element><element sketum_id="9B5250BC5C314057">0.42785800000000002</element><element sketum_id="508174081DB641F9">1.0000000000000001e-05</element><element sketum_id="E0BF039CC5064B60">0.799512</element><element sketum_id="21CC1AF7CD154DB3">0.66193900000000006</element><element sketum_id="7601D3D327F54746">0.97794899999999996</element><element sketum_id="3410B1483F724731">0</element></CoefScale></element></added_components>
+    <added_traits />
+    <definition>
+      <url>_project/New Folder1/model/SM_Cube.prefab.ast</url>
+      <guid />
+      <parameter>
+        <parameters />
+      </parameter>
+    </definition>
+    <script_components />
+    <volume_components />
+    <mesh_component>
+      <group>default</group>
+      <mesh>
+        <url />
+        <guid />
+        <parameter>
+          <parameters />
+        </parameter>
+      </mesh>
+    </mesh_component>
+    <setting>
+      <is_destructible>0</is_destructible>
+      <is_modify_terrain>0</is_modify_terrain>
+      <is_cast_shadow_in_far_distance>1</is_cast_shadow_in_far_distance>
+      <is_only_show_gvg_city>0</is_only_show_gvg_city>
+      <custom_materials />
+    </setting>
+    <is_force_ground>1</is_force_ground>
+    <object_tags />
+  </element>
+  
+  <element sketum_id="D47H2Q09ASSF2WYN" type="StaticObjectInstanceData">
+    <guid>D47HWL00ASSF4WKU</guid>
+    <name>SM_Cube11</name>
+    <transform>
+      <position>700.000000 2600.000000 250.000000</position>
+      <rotation>0.000000 0.000000 0.000000 1.000000</rotation>
+      <scale>6.000000 3.000000 2.000000</scale>
+    </transform>
+    
+    <added_components><element sketum_id="B9A9480F48A64DCD" type="LightMapComponentDefinition"><group>default</group><HQ><url>_project/New Folder1/lightMaps/HQ_Lightmap0_14.texture.ast</url><guid /><parameter><parameters /></parameter></HQ><LQ><url>_project/New Folder1/lightMaps/packed_lightmap_0.texture.ast</url><guid /><parameter><parameters /></parameter></LQ><BiasScale>0 0 0.12451171875 0.12451171875</BiasScale><CoefAdd><element sketum_id="26DCBD94E3A34A82">1</element><element sketum_id="B95313560894403C">0.89757466316223145</element><element sketum_id="E91FE83715F246C0">0.78922849893569946</element><element sketum_id="E360C80A95374069">-5.75</element><element sketum_id="688A22CF61EB482A">-0.50628238916397095</element><element sketum_id="C89B4F7F4B2142BE">-0.16361448168754578</element><element sketum_id="7FF36728CE0B495D">-0.046665679663419724</element><element sketum_id="2E547D5A5D6B4987">0.28209498524665833</element><element sketum_id="4039CE149E984A6D">0.0099999997764825821</element><element sketum_id="B8743B1F02364AF0">0.0099999997764825821</element><element sketum_id="B0D59676B2964318">0.0099999997764825821</element><element sketum_id="6839072662524E72">0</element><element sketum_id="688329E1CA9F4FC8">-0.50628238916397095</element><element sketum_id="BEA62D3E17504463">-0.16361448168754578</element><element sketum_id="0A905DCB15CC4C32">-0.046665679663419724</element><element sketum_id="6AB15DF895914988">0.28209498524665833</element></CoefAdd><CoefScale><element sketum_id="09F5A0521713404E">0.27871954441070557</element><element sketum_id="EF4913F11F8F4D4A">0.10242533683776855</element><element sketum_id="8DE701C154A54757">0.21077150106430054</element><element sketum_id="3DB5ECE6C1FA4E0B">2.4840738773345947</element><element sketum_id="DC42D8246AE54644">0.51965570449829102</element><element sketum_id="7147CCD58951464E">0.32414984703063965</element><element sketum_id="52EAAF586F5D4D3C">0.44048750400543213</element><element sketum_id="A256FDCF15C0407F">0</element><element sketum_id="A8A5E08175DA4E49">0.33128654956817627</element><element sketum_id="A76B803636054B8E">0.26684293150901794</element><element sketum_id="00430000BC1E41E4">0.23031595349311829</element><element sketum_id="70DA3AA4E0E9452D">9.9999997473787516e-06</element><element sketum_id="C3CB69EE63C641D1">0.51965570449829102</element><element sketum_id="890FFF528EF04DA2">0.32414984703063965</element><element sketum_id="6928B3583E704E80">0.44048750400543213</element><element sketum_id="463078C1EA1B4368">0</element></CoefScale></element></added_components>
+    <added_traits />
+    <definition>
+      <url>_project/New Folder1/model/SM_Cube.prefab.ast</url>
+      <guid />
+      <parameter>
+        <parameters />
+      </parameter>
+    </definition>
+    <script_components />
+    <volume_components />
+    <mesh_component>
+      <group>default</group>
+      <mesh>
+        <url />
+        <guid />
+        <parameter>
+          <parameters />
+        </parameter>
+      </mesh>
+    </mesh_component>
+    <setting>
+      <is_destructible>0</is_destructible>
+      <is_modify_terrain>0</is_modify_terrain>
+      <is_cast_shadow_in_far_distance>1</is_cast_shadow_in_far_distance>
+      <is_only_show_gvg_city>0</is_only_show_gvg_city>
+      <custom_materials />
+    </setting>
+    <is_force_ground>1</is_force_ground>
+    <object_tags />
+  </element>
+  
+  <element sketum_id="E58H3Q09ASSF3WYN" type="StaticObjectInstanceData">
+    <guid>E58HWL00ASSF5WKU</guid>
+    <name>Floor</name>
+    <transform>
+      <position>0.000000 0.000000 -0.500000</position>
+      <rotation>0.000000 0.000000 0.000000 1.000000</rotation>
+      <scale>8.000000 8.000000 8.000000</scale>
+    </transform>
+    <added_components />
+    <added_traits />
+    <definition>
+      <url>_project/New Folder1/model/SM_Floor.prefab.ast</url>
+      <guid />
+      <parameter>
+        <parameters />
+      </parameter>
+    </definition>
+    <script_components />
+    <volume_components />
+    <mesh_component>
+      <group>default</group>
+      <mesh>
+        <url />
+        <guid />
+        <parameter>
+          <parameters />
+        </parameter>
+      </mesh>
+    </mesh_component>
+    <setting>
+      <is_destructible>0</is_destructible>
+      <is_modify_terrain>0</is_modify_terrain>
+      <is_cast_shadow_in_far_distance>1</is_cast_shadow_in_far_distance>
+      <is_only_show_gvg_city>0</is_only_show_gvg_city>
+      <custom_materials />
+    </setting>
+    <is_force_ground>1</is_force_ground>
+    <object_tags />
+  </element>
+</scene>

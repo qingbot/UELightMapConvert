@@ -1,0 +1,166 @@
+{
+    "SM_Cube11": {
+        "Name": "SM_Cube11",
+        "Location": [
+            700,
+            2600,
+            250
+        ],
+        "Rotation": [
+            0,
+            0,
+            0,
+            1
+        ],
+        "Scale": [
+            6,
+            3,
+            2
+        ],
+        "ActorType": "StaticMesh",
+        "LightMap": {
+            "HQ": "HQ_Lightmap0_14",
+            "LQ": "packed_lightmap_0",
+            "BiasScale": [
+                0.0,
+                0.0,
+                0.12451171875,
+                0.12451171875
+            ],
+            "CoefScale": [
+                0.27871954441070557,
+                0.10242533683776855,
+                0.21077150106430054,
+                2.4840738773345947,
+                0.519655704498291,
+                0.32414984703063965,
+                0.44048750400543213,
+                0,
+                0.33128654956817627,
+                0.26684293150901794,
+                0.2303159534931183,
+                9.999999747378752e-06,
+                0.519655704498291,
+                0.32414984703063965,
+                0.44048750400543213,
+                0
+            ],
+            "CoefAdd": [
+                1,
+                0.8975746631622314,
+                0.7892284989356995,
+                -5.75,
+                -0.506282389163971,
+                -0.16361448168754578,
+                -0.046665679663419724,
+                0.2820949852466583,
+                0.009999999776482582,
+                0.009999999776482582,
+                0.009999999776482582,
+                0,
+                -0.506282389163971,
+                -0.16361448168754578,
+                -0.046665679663419724,
+                0.2820949852466583
+            ]
+        },
+        "Parameters": {
+            "MeshJsonURL": "C:/chaos_integrated_tools/data_analysis/model/static_mesh/SM_Cube.json",
+            "MeshDataURL": "C:/chaos_integrated_tools/data_analysis/model/static_mesh/SM_Cube.fbx"
+        }
+    },
+    "SM_Cube5": {
+        "Name": "SM_Cube5",
+        "Location": [
+            1000,
+            1000,
+            250
+        ],
+        "Rotation": [
+            0,
+            0,
+            0,
+            1
+        ],
+        "Scale": [
+            33,
+            1,
+            10.5
+        ],
+        "ActorType": "StaticMesh",
+        "LightMap": {
+            "HQ": "HQ_Lightmap0_20",
+            "LQ": "packed_lightmap_0",
+            "BiasScale": [
+                0.124512,
+                0.0,
+                0.124512,
+                0.124512
+            ],
+            "CoefScale": [
+                0.504421,
+                0.194006,
+                0.43496,
+                6.215153,
+                0.799512,
+                0.661939,
+                0.977949,
+                0.0,
+                0.612357,
+                0.503961,
+                0.427858,
+                0.00001,
+                0.799512,
+                0.661939,
+                0.977949,
+                0.0
+            ],
+            "CoefAdd": [
+                1.0,
+                0.805994,
+                0.56504,
+                -5.75,
+                -0.388895,
+                -0.3492,
+                -0.447107,
+                0.282095,
+                0.01,
+                0.01,
+                0.01,
+                0.0,
+                -0.388895,
+                -0.3492,
+                -0.447107,
+                0.282095
+            ]
+        },
+        "Parameters": {
+            "MeshJsonURL": "C:/chaos_integrated_tools/data_analysis/model/static_mesh/SM_Cube.json",
+            "MeshDataURL": "C:/chaos_integrated_tools/data_analysis/model/static_mesh/SM_Cube.fbx"
+        }
+    },
+    "Floor": {
+        "Name": "Floor",
+        "Location": [
+            0,
+            0,
+            -0.5
+        ],
+        "Rotation": [
+            0,
+            0,
+            0,
+            1
+        ],
+        "Scale": [
+            8,
+            8,
+            8
+        ],
+        "ActorType": "StaticMesh",
+        "Parameters": {
+            "MeshJsonURL": "C:/chaos_integrated_tools/data_analysis/model/static_mesh/SM_Floor.json",
+            "MeshDataURL": "C:/chaos_integrated_tools/data_analysis/model/static_mesh/SM_Floor.fbx"
+        }
+    }
+} 
