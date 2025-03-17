@@ -1,0 +1,13 @@
+LIBRARY LightmapPacker
+EXPORTS
+    CreateLightmapPacker @1
+    DestroyLightmapPacker @2
+    SetTextureSize @3
+    AddGroup @4
+    PackLightmaps @5
+    GetTextureCount @6
+    GetPackingEfficiency @7
+    GetResultCount @8
+    GetResult @9
+    TestLog @10
+    SetLogCallBack @11

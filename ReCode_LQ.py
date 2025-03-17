@@ -13,6 +13,8 @@ from datetime import datetime
 import copy
 from collections import defaultdict
 import argparse
+import cv2
+import random
 
 TextureSize = 2048
 
@@ -1243,10 +1245,7 @@ def global_packing_optimization(groups):
 
 def find_global_optimal_solution(groups):
     """
-    寻找全局最优解，通过以下步骤：
-    1. 为每个组计算最佳分辨率（单独放入空纹理时的最大缩放）
-    2. 尝试不同的组合，找到空间利用率最高的方案
-    3. 返回最优组合和布局方案
+    寻找全局最优解，使用模拟退火算法代替全排列
     
     Args:
         groups: 按组整理的数据字典
@@ -1254,7 +1253,7 @@ def find_global_optimal_solution(groups):
     Returns:
         最优布局方案和空纹理列表
     """
-    print("开始寻找全局最优解...")
+    print("开始寻找全局最优解(使用模拟退火算法)...")
     
     # 步骤1：为每个组计算最佳分辨率
     group_list = []
@@ -1298,286 +1297,11 @@ def find_global_optimal_solution(groups):
         print(f"组 {key} 的最佳缩放比例: {optimal_scale}")
         group_list.append(group)
     
-    # 取消组数量限制，因为已经有了高效的剪枝策略
-    # 按面积从大到小排序以提高效率
+    # 按面积从大到小排序以提高初始解质量
     group_list.sort(key=lambda g: g['area'], reverse=True)
-    limited_groups = group_list
     
-    # 步骤2：尝试不同的组合
-    best_utilization = 0
-    best_assignment = None
-    best_packer = None
-    
-    # 缓存已经计算过的组合结果
-    combination_cache = {}
-    
-    # 计算组合的总数量，用于进度显示
-    total_combinations = math.factorial(len(limited_groups))
-    print(f"开始尝试 {total_combinations} 种可能的组合...")
-    
-    # 进度计数器
-    combination_counter = 0
-    last_progress_report = time.time()
-    progress_report_interval = 2  # 每2秒报告一次进度
-    
-    # 设置超时时间
-    start_time = time.time()
-    timeout_seconds = 300  # 5分钟超时
-    
-    # 保存最有希望的前N个组合，后续可以深入探索
-    best_candidates = []
-    best_candidates_size = 10
-    
-    for group_order in itertools.permutations(limited_groups):
-        # 检查超时
-        if time.time() - start_time > timeout_seconds:
-            print(f"达到超时限制 ({timeout_seconds}秒)，停止组合搜索")
-            break
-        
-        # 更新进度并报告
-        combination_counter += 1
-        current_time = time.time()
-        if current_time - last_progress_report > progress_report_interval:
-            progress_percentage = (combination_counter / total_combinations) * 100
-            elapsed_time = current_time - start_time
-            estimated_total_time = elapsed_time / (combination_counter / total_combinations)
-            remaining_time = estimated_total_time - elapsed_time
-            
-            print(f"进度: {progress_percentage:.2f}% ({combination_counter}/{total_combinations})，"
-                  f"已用时间: {elapsed_time:.1f}秒，"
-                  f"预计剩余: {remaining_time:.1f}秒，"
-                  f"当前最优利用率: {best_utilization:.2%}")
-            last_progress_report = current_time
-        
-        # 创建组合的唯一键
-        order_key = tuple(g['key'] for g in group_order)
-        
-        # 检查缓存中是否已存在此组合结果
-        if order_key in combination_cache:
-            utilization, assignments = combination_cache[order_key]
-            # 直接使用缓存结果更新最优解
-            if utilization > best_utilization:
-                best_utilization = utilization
-                best_assignment = assignments
-                print(f"从缓存中找到更优方案: 空间利用率 {best_utilization:.2%}")
-            continue
-        
-        # 快速估计：首先检查前3个组的放置情况
-        estimate_packer = GlobalRectPacker(TextureSize, TextureSize)
-        estimate_success = True
-        estimate_used_space = 0
-        estimate_total_space = 0
-        
-        # 只尝试前3个组或全部组（如果总数少于3）
-        for i, group in enumerate(group_order):
-            if i >= 3 and len(group_order) > 5:  # 只有大组合才做估计剪枝
-                break
-                
-            scale = group['optimal_scale']
-            placed = False
-            
-            # 计算该组缩放后的总面积
-            group_area = sum(w * h * (scale ** 2) for w, h in group['sizes'])
-            
-            # 尝试放入现有纹理
-            for texture_idx in range(len(estimate_packer.textures)):
-                texture_idx, positions, _, _ = estimate_packer.can_fit_group(group, scale, existing_only=True)
-                if positions:
-                    # 更新估计使用空间
-                    estimate_used_space += group_area
-                    estimate_total_space = TextureSize * TextureSize * (len(estimate_packer.textures))
-                    
-                    # 更新使用信息
-                    for j, pos in enumerate(positions):
-                        if pos is None:
-                            continue
-                        w, h = group['sizes'][j]
-                        scaled_w = max(1, int(w * scale))
-                        scaled_h = max(1, int(h * scale))
-                        estimate_packer.used_positions[texture_idx].append((pos, (scaled_w, scaled_h)))
-                        estimate_packer.texture_remaining_space[texture_idx] -= scaled_w * scaled_h
-                    
-                    placed = True
-                    break
-            
-            # 如果现有纹理放不下，创建新纹理
-            if not placed:
-                new_texture_idx = estimate_packer.add_texture()
-                texture_idx, positions, _, _ = estimate_packer.can_fit_group(group, scale, specific_texture=new_texture_idx)
-                
-                if positions:
-                    # 更新估计使用空间
-                    estimate_used_space += group_area
-                    estimate_total_space = TextureSize * TextureSize * (len(estimate_packer.textures))
-                    
-                    # 更新使用信息
-                    for j, pos in enumerate(positions):
-                        if pos is None:
-                            continue
-                        w, h = group['sizes'][j]
-                        scaled_w = max(1, int(w * scale))
-                        scaled_h = max(1, int(h * scale))
-                        estimate_packer.used_positions[texture_idx].append((pos, (scaled_w, scaled_h)))
-                        estimate_packer.texture_remaining_space[texture_idx] -= scaled_w * scaled_h
-                else:
-                    estimate_success = False
-                    break
-        
-        # 计算估计利用率
-        estimate_utilization = estimate_used_space / estimate_total_space if estimate_total_space > 0 else 0
-        
-        # 如果估计利用率太低，或需要太多纹理，跳过此组合
-        if (len(group_order) > 5 and  # 只对大组合应用剪枝
-            (not estimate_success or  # 如果前3个组都放不下
-             (estimate_utilization < best_utilization * 0.7) or  # 如果估计利用率远低于当前最优
-             (len(estimate_packer.textures) > len(limited_groups) // 2))):  # 如果纹理数量太多
-            continue
-        
-        # 创建新的打包器
-        packer = GlobalRectPacker(TextureSize, TextureSize)
-        assignments = {}
-        
-        # 按当前顺序尝试放置所有组
-        for group in group_order:
-            scale = group['optimal_scale']
-            placed = False
-            
-            # 先尝试放入现有纹理
-            for texture_idx in range(len(packer.textures)):
-                texture_idx, positions, _, _ = packer.can_fit_group(group, scale, existing_only=True)
-                if positions:
-                    # 成功放置，记录分配
-                    assignments[group['key']] = {
-                        'texture_idx': texture_idx,
-                        'scale': scale,
-                        'positions': positions,
-                        'group': group
-                    }
-                    
-                    # 更新使用信息
-                    for i, pos in enumerate(positions):
-                        if pos is None:
-                            continue
-                        w, h = group['sizes'][i]
-                        scaled_w = max(1, int(w * scale))
-                        scaled_h = max(1, int(h * scale))
-                        packer.used_positions[texture_idx].append((pos, (scaled_w, scaled_h)))
-                        packer.texture_remaining_space[texture_idx] -= scaled_w * scaled_h
-                    
-                    placed = True
-                    break
-            
-            # 如果现有纹理放不下，创建新纹理
-            if not placed:
-                new_texture_idx = packer.add_texture()
-                texture_idx, positions, _, _ = packer.can_fit_group(group, scale, specific_texture=new_texture_idx)
-                
-                if positions:
-                    # 成功放置，记录分配
-                    assignments[group['key']] = {
-                        'texture_idx': texture_idx,
-                        'scale': scale,
-                        'positions': positions,
-                        'group': group
-                    }
-                    
-                    # 更新使用信息
-                    for i, pos in enumerate(positions):
-                        if pos is None:
-                            continue
-                        w, h = group['sizes'][i]
-                        scaled_w = max(1, int(w * scale))
-                        scaled_h = max(1, int(h * scale))
-                        packer.used_positions[texture_idx].append((pos, (scaled_w, scaled_h)))
-                        packer.texture_remaining_space[texture_idx] -= scaled_w * scaled_h
-                
-                else:
-                    print(f"警告: 组 {group['key']} 即使使用其最佳缩放比例 {scale} 也无法放入新纹理")
-            
-            # 添加新的剪枝条件：检查剩余空间是否足够放置剩余组中的任何一个
-            # 这只在我们已经处理了部分组后才有必要检查
-            if len(assignments) > 0 and len(assignments) < len(group_order):
-                # 获取还未放置的组
-                placed_keys = set(assignments.keys())
-                remaining_groups = [g for g in group_order if g['key'] not in placed_keys]
-                
-                # 获取当前纹理的最大剩余连续空间
-                max_remaining_space = 0
-                largest_empty_region = None
-                for texture_idx in range(len(packer.textures)):
-                    # 创建当前纹理的占用图
-                    occupation_map = np.zeros((TextureSize, TextureSize), dtype=bool)
-                    for pos, size in packer.used_positions[texture_idx]:
-                        x, y = pos
-                        w, h = size
-                        occupation_map[y:y+h, x:x+w] = True
-                    
-                    # 使用空区域索引找到最大连续空间
-                    empty_regions = packer._build_empty_regions_index(occupation_map)
-                    for region in empty_regions:
-                        x, y, w, h = region
-                        region_area = w * h
-                        if region_area > max_remaining_space:
-                            max_remaining_space = region_area
-                            largest_empty_region = (w, h)
-                
-                if largest_empty_region is None:
-                    # 如果没有空区域，直接剪枝
-                    print(f"剪枝：组合中所有纹理已完全填满")
-                    continue
-                
-                max_width, max_height = largest_empty_region
-                
-                # 检查任何剩余组中最小的物体是否能放入
-                can_place_any = False
-                for group in remaining_groups:
-                    # 检查该组中是否有物体能放入当前最大空区域
-                    for w, h in group['sizes']:
-                        scaled_w = max(1, int(w * group['optimal_scale']))
-                        scaled_h = max(1, int(h * group['optimal_scale']))
-                        
-                        # 检查物体是否能放入空区域（考虑宽高，不仅仅是面积）
-                        if scaled_w <= max_width and scaled_h <= max_height:  # 物体不能旋转
-                            can_place_any = True
-                            break
-                    
-                    if can_place_any:
-                        break
-                
-                # 如果没有剩余组能放入，则剪枝
-                if not can_place_any:
-                    print(f"剪枝：组合 {[g['key'] for g in group_order]} 的剩余空间不足以放置任何剩余物体")
-                    continue
-        
-        # 计算当前组合的空间利用率
-        total_pixels = len(packer.textures) * TextureSize * TextureSize
-        used_pixels = 0
-        for texture_idx, positions in enumerate(packer.used_positions):
-            usage_mask = np.zeros((TextureSize, TextureSize), dtype=bool)
-            for pos, size in positions:
-                x, y = pos
-                w, h = size
-                usage_mask[y:y+h, x:x+w] = True
-            texture_used = np.sum(usage_mask)
-            used_pixels += texture_used
-        
-        utilization = used_pixels / total_pixels
-        
-        # 将结果存入缓存
-        combination_cache[order_key] = (utilization, assignments)
-        
-        # 添加到候选列表
-        best_candidates.append((utilization, assignments, packer))
-        best_candidates.sort(key=lambda x: x[0], reverse=True)
-        if len(best_candidates) > best_candidates_size:
-            best_candidates.pop()
-        
-        # 检查是否是最佳方案
-        if utilization > best_utilization:
-            best_utilization = utilization
-            best_assignment = assignments
-            best_packer = packer
-            print(f"找到更优方案: 空间利用率 {best_utilization:.2%}，使用 {len(packer.textures)} 个纹理")
+    # 步骤2：使用模拟退火算法寻找最优组合
+    best_assignment, best_utilization, best_packer = simulated_annealing_optimization(group_list)
     
     print(f"\n最优方案: 空间利用率 {best_utilization:.2%}, 使用 {len(best_packer.textures)} 个纹理")
     
@@ -1648,40 +1372,209 @@ def find_global_optimal_solution(groups):
             scaled_w = max(1, int(original_w * scale))
             scaled_h = max(1, int(original_h * scale))
             
-            # 缩放图像
-            if scale != 1.0:
-                img = Image.fromarray(texture)
-                scaled_img = img.resize((scaled_w, scaled_h), Image.NEAREST)
-                scaled_texture = np.array(scaled_img)
+            # 调整图像大小
+            if scaled_w != texture.shape[1] or scaled_h != texture.shape[0]:
+                resized_texture = cv2.resize(texture, (scaled_w, scaled_h), interpolation=cv2.INTER_LINEAR)
             else:
-                scaled_texture = texture
+                resized_texture = texture
             
-            # 验证目标区域大小
-            if y+scaled_h > TextureSize or x+scaled_w > TextureSize:
-                print(f"警告: 目标区域 ({x}, {y}, {scaled_w}, {scaled_h}) 超出纹理边界 {TextureSize}x{TextureSize}")
-                continue
-                
-            # 检查尺寸是否匹配
-            if scaled_texture.shape[0] != scaled_h or scaled_texture.shape[1] != scaled_w:
-                print(f"警告: 纹理尺寸不匹配，预期 ({scaled_w}, {scaled_h})，"
-                      f"实际 ({scaled_texture.shape[1]}, {scaled_texture.shape[0]})")
-                
-                # 调整纹理大小以匹配
-                img = Image.fromarray(scaled_texture)
-                img = img.resize((scaled_w, scaled_h), Image.NEAREST)
-                scaled_texture = np.array(img)
-            
+            # 填充到目标纹理中
             try:
-                # 复制纹理数据到目标区域
-                empty_textures[texture_idx][y:y+scaled_h, x:x+scaled_w] = scaled_texture
-            except Exception as e:
-                print(f"填充纹理时出错: {e}")
-                print(f"目标形状: {empty_textures[texture_idx][y:y+scaled_h, x:x+scaled_w].shape}, "
-                      f"源形状: {scaled_texture.shape}")
+                empty_textures[texture_idx][y:y+scaled_h, x:x+scaled_w] = resized_texture
+            except ValueError as e:
+                print(f"错误: 无法填充图像到纹理中，位置:({x}, {y})，大小:({scaled_w}, {scaled_h})，纹理形状:{empty_textures[texture_idx].shape}")
+                print(f"原始纹理形状:{texture.shape}, 缩放后形状:{resized_texture.shape}")
+                print(f"错误信息: {e}")
     
-    print("纹理数据填充完成")
+    return results, empty_textures
+
+def simulated_annealing_optimization(group_list, initial_temp=100.0, min_temp=0.1, cooling_rate=0.95, iterations_per_temp=50):
+    """
+    使用模拟退火算法寻找最优打包顺序
     
-    return results, empty_textures, best_assignment
+    Args:
+        group_list: 组列表
+        initial_temp: 初始温度
+        min_temp: 最小温度（终止条件）
+        cooling_rate: 冷却速率
+        iterations_per_temp: 每个温度的迭代次数
+        
+    Returns:
+        最优分配，利用率和打包器
+    """
+    print(f"开始模拟退火优化，共{len(group_list)}个组")
+    
+    # 创建初始解（按面积排序）
+    current_solution = group_list.copy()
+    
+    # 评估初始解
+    current_packer = GlobalRectPacker(TextureSize, TextureSize)
+    current_assignment = {}
+    current_utilization = evaluate_packing_solution(current_solution, current_packer, current_assignment)
+    
+    # 保存最佳解
+    best_solution = current_solution.copy()
+    best_packer = copy.deepcopy(current_packer)
+    best_assignment = copy.deepcopy(current_assignment)
+    best_utilization = current_utilization
+    
+    # 模拟退火主循环
+    temperature = initial_temp
+    iteration = 0
+    no_improvement_count = 0
+    max_no_improvement = 500  # 如果500次迭代没有改进，提前终止
+    
+    print(f"初始利用率: {best_utilization:.2%}")
+    
+    while temperature > min_temp and no_improvement_count < max_no_improvement:
+        for _ in range(iterations_per_temp):
+            iteration += 1
+            
+            # 生成新解（通过交换或移动操作）
+            new_solution = current_solution.copy()
+            
+            # 随机选择扰动类型
+            if random.random() < 0.5:
+                # 交换两个组的位置
+                if len(new_solution) >= 2:  # 确保至少有两个组可交换
+                    i, j = random.sample(range(len(new_solution)), 2)
+                    new_solution[i], new_solution[j] = new_solution[j], new_solution[i]
+            else:
+                # 移动一个组到新位置
+                if len(new_solution) >= 2:  # 确保至少有两个位置可移动
+                    old_idx = random.randrange(len(new_solution))
+                    new_idx = random.randrange(len(new_solution))
+                    item = new_solution.pop(old_idx)
+                    new_solution.insert(new_idx, item)
+            
+            # 评估新解
+            new_packer = GlobalRectPacker(TextureSize, TextureSize)
+            new_assignment = {}
+            new_utilization = evaluate_packing_solution(new_solution, new_packer, new_assignment)
+            
+            # 计算能量差
+            delta_e = new_utilization - current_utilization
+            
+            # Metropolis准则：接受或拒绝新解
+            if delta_e > 0 or random.random() < math.exp(delta_e / temperature):
+                current_solution = new_solution
+                current_packer = new_packer
+                current_assignment = new_assignment
+                current_utilization = new_utilization
+                
+                # 更新最佳解
+                if current_utilization > best_utilization:
+                    best_solution = current_solution.copy()
+                    best_packer = copy.deepcopy(current_packer)
+                    best_assignment = copy.deepcopy(current_assignment)
+                    best_utilization = current_utilization
+                    no_improvement_count = 0
+                    print(f"[迭代 {iteration}] 找到更优方案: 利用率 {best_utilization:.2%}, 温度: {temperature:.2f}")
+                else:
+                    no_improvement_count += 1
+            else:
+                no_improvement_count += 1
+            
+            # 如果已达到很高的利用率，提前终止
+            if best_utilization > 0.95:
+                print(f"达到足够高的利用率({best_utilization:.2%})，提前终止搜索")
+                break
+        
+        # 冷却
+        temperature *= cooling_rate
+        print(f"温度降至 {temperature:.2f}, 当前最优利用率: {best_utilization:.2%}")
+        
+        # 如果已达到很高的利用率，提前终止
+        if best_utilization > 0.95:
+            break
+    
+    print(f"模拟退火完成，共{iteration}次迭代，最终利用率: {best_utilization:.2%}，使用{len(best_packer.textures)}个纹理")
+    return best_assignment, best_utilization, best_packer
+
+def evaluate_packing_solution(group_order, packer, assignments):
+    """
+    评估打包方案的质量
+    
+    Args:
+        group_order: 组的顺序
+        packer: 打包器实例
+        assignments: 存储分配结果的字典（会被修改）
+        
+    Returns:
+        空间利用率
+    """
+    # 每个组尝试放入打包器
+    for group in group_order:
+        scale = group['optimal_scale']
+        placed = False
+        
+        # 先尝试放入现有纹理
+        for texture_idx in range(len(packer.textures)):
+            texture_idx, positions, _, _ = packer.can_fit_group(group, scale, existing_only=True)
+            if positions:
+                # 成功放置，记录分配
+                assignments[group['key']] = {
+                    'texture_idx': texture_idx,
+                    'scale': scale,
+                    'positions': positions,
+                    'group': group
+                }
+                
+                # 更新使用信息
+                for i, pos in enumerate(positions):
+                    if pos is None:
+                        continue
+                    w, h = group['sizes'][i]
+                    scaled_w = max(1, int(w * scale))
+                    scaled_h = max(1, int(h * scale))
+                    packer.used_positions[texture_idx].append((pos, (scaled_w, scaled_h)))
+                    packer.texture_remaining_space[texture_idx] -= scaled_w * scaled_h
+                
+                placed = True
+                break
+        
+        # 如果现有纹理放不下，创建新纹理
+        if not placed:
+            new_texture_idx = packer.add_texture()
+            texture_idx, positions, _, _ = packer.can_fit_group(group, scale, specific_texture=new_texture_idx)
+            
+            if positions:
+                # 成功放置，记录分配
+                assignments[group['key']] = {
+                    'texture_idx': texture_idx,
+                    'scale': scale,
+                    'positions': positions,
+                    'group': group
+                }
+                
+                # 更新使用信息
+                for i, pos in enumerate(positions):
+                    if pos is None:
+                        continue
+                    w, h = group['sizes'][i]
+                    scaled_w = max(1, int(w * scale))
+                    scaled_h = max(1, int(h * scale))
+                    packer.used_positions[texture_idx].append((pos, (scaled_w, scaled_h)))
+                    packer.texture_remaining_space[texture_idx] -= scaled_w * scaled_h
+            
+            else:
+                # 无法放入新纹理，这不应该发生，因为新纹理是空的
+                print(f"警告: 组 {group['key']} 即使使用其最佳缩放比例 {scale} 也无法放入新纹理")
+    
+    # 计算空间利用率
+    total_pixels = len(packer.textures) * TextureSize * TextureSize
+    used_pixels = 0
+    for texture_idx, positions in enumerate(packer.used_positions):
+        usage_mask = np.zeros((TextureSize, TextureSize), dtype=bool)
+        for pos, size in positions:
+            x, y = pos
+            w, h = size
+            usage_mask[y:y+h, x:x+w] = True
+        texture_used = np.sum(usage_mask)
+        used_pixels += texture_used
+    
+    utilization = used_pixels / total_pixels
+    return utilization
 
 def calculate_optimal_scale(group, texture_size):
     """
@@ -1742,69 +1635,13 @@ def pack_lightmaps(json_data, use_global_optimal=True):
     try:
         # 根据选择，使用不同的算法进行打包
         if use_global_optimal:
-            print("使用全局最优解算法进行打包...")
-            results, textures, final_assignments = find_global_optimal_solution(groups)
+            print("使用模拟退火算法进行打包...")
+            results, textures = find_global_optimal_solution(groups)
         else:
             print("使用传统算法进行打包...")
-            results, textures, final_assignments = global_packing_optimization(groups)
+            results, textures = global_packing_optimization(groups)
         
         print(f"\n总共生成了 {len(textures)} 个纹理")
-        print(f"现在开始统一处理所有图片...")
-        
-        # 在所有布局规划完成后，统一处理所有图片
-        for group_key, assignment in final_assignments.items():
-            group = assignment['group']
-            texture_idx = assignment['texture_idx']
-            scale = assignment['scale']
-            positions = assignment['positions']
-            
-            print(f"处理组 {group_key} 的图片...")
-            
-            # 为组中的每个物体加载和处理图片
-            for i, info in enumerate(group['infos']):
-                if i >= len(positions) or positions[i] is None:
-                    continue
-                
-                # 加载灯光贴图
-                lightmap_name = info["LQ"] if info["LQ"].endswith('.png') else f"{info['LQ']}.png"
-                lightmap_path = Path.joinpath(LightmapPath, lightmap_name)
-                
-                try:
-                    # 提取和缩放纹理
-                    texture = extract_lightmap(lightmap_path, info["BiasScale"])
-                    
-                    # 计算缩放后的尺寸
-                    w, h = group['sizes'][i]
-                    scaled_w = max(1, int(w * scale))
-                    scaled_h = max(1, int(h * scale))
-                    
-                    # 缩放图片
-                    if scale != 1.0:
-                        img = Image.fromarray(texture)
-                        scaled_img = img.resize((scaled_w, scaled_h), Image.NEAREST)
-                        texture = np.array(scaled_img)
-                    
-                    # 获取位置
-                    x, y = positions[i]
-                    
-                    # 检查目标尺寸是否匹配纹理尺寸
-                    if texture.shape[0] != scaled_h or texture.shape[1] != scaled_w:
-                        print(f"警告:纹理大小不匹配:预期 ({scaled_w}, {scaled_h}),"
-                              f"实际 ({texture.shape[1]}, {texture.shape[0]})")
-                        # 调整纹理大小以匹配
-                        img = Image.fromarray(texture)
-                        img = img.resize((scaled_w, scaled_h), Image.NEAREST)
-                        texture = np.array(img)
-                    
-                    # 将纹理放置到目标位置
-                    try:
-                        textures[texture_idx][y:y+scaled_h, x:x+scaled_w] = texture
-                    except ValueError as e:
-                        print(f"复制纹理时出错:{e}")
-                        print(f"目标形状: {textures[texture_idx][y:y+scaled_h, x:x+scaled_w].shape}, 源形状: {texture.shape}")
-                except Exception as e:
-                    print(f"处理图片时出错: {e}")
-                    print(traceback.format_exc())
         
         # 保存所有生成的纹理
         for i, texture_array in enumerate(textures):
@@ -1920,7 +1757,7 @@ def main():
     # 创建参数解析器
     parser = argparse.ArgumentParser(description='灯光贴图打包工具')
     parser.add_argument('--algorithm', type=str, default='global', choices=['global', 'traditional'],
-                        help='打包算法: global为全局最优解, traditional为传统算法')
+                        help='打包算法: global为模拟退火优化算法, traditional为传统算法')
     args = parser.parse_args()
     
     print("=== 灯光贴图打包工具 ===")
