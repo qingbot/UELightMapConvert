@@ -11,6 +11,7 @@ import json
 import time
 import platform
 from typing import List, Tuple, Dict, Optional, Any
+from lightmap_structures import InputGroupData, OutputGroupData,SingleOutputRectangle
 
 # 定义回调函数类型
 LOGFUNC = ctypes.CFUNCTYPE(None, ctypes.c_char_p)
@@ -26,7 +27,6 @@ def Log(message):
         except UnicodeDecodeError:
             # 如果GBK也解码失败，使用repr显示原始字节
             msg = repr(message)
-    
     print(msg)
 
 class LightmapPackerPython:
@@ -101,7 +101,7 @@ class LightmapPackerPython:
         self.dll.SetTextureSize.restype = ctypes.c_bool
         
         # 添加组
-        self.dll.AddGroup.argtypes = [ctypes.c_void_p]
+        self.dll.AddGroup.argtypes = [ctypes.c_void_p, InputGroupData]
         self.dll.AddGroup.restype = ctypes.c_bool
         
         # 打包函数
@@ -144,32 +144,9 @@ class LightmapPackerPython:
         """设置输出纹理大小"""
         return self.dll.SetTextureSize(self.instance, texture_size)
     
-    def add_group(self, group_key: str, rectangles: List[Dict[str, Any]]) -> bool:
-        """
-        添加一个组的矩形信息
-        
-        Args:
-            group_key: 组的唯一标识
-            rectangles: 该组中所有物体的矩形信息列表
-                每个矩形需要包含以下字段:
-                - mesh_id: 物体ID
-                - name: 物体名称
-                - width: 宽度 (像素)
-                - height: 高度 (像素)
-                - original_bias_scale: 原始的bias_scale
-                - lightmap_lq: 原始的灯光贴图路径
-        
-        Returns:
-            是否成功添加
-        """
-        # 缓存组数据
-        self._group_data[group_key] = rectangles
-        
-        # 将组数据转换为JSON字符串
-        group_json = json.dumps(rectangles)
-        
+    def add_group(self, input_group_data: InputGroupData) -> bool:
         # 调用C++ DLL添加组
-        return self.dll.AddGroup(self.instance)
+        return self.dll.AddGroup(self.instance, input_group_data)
     
     def pack_lightmaps(self, use_simulated_annealing: bool = True) -> bool:
         """
@@ -300,6 +277,8 @@ def main():
     lightmap_packer.set_log_callback(log_callback)
     lightmap_packer.test_log()
 
+    input_group_data = InputGroupData(100, 100, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+    lightmap_packer.add_group(input_group_data)
+
 if __name__ == "__main__":
     sys.exit(main()) 
-    

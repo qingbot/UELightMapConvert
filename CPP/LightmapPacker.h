@@ -81,7 +81,7 @@ public:
      * @param group_json_data 当前Group的JSON数据(原始的JSON数据)
      * @return 是否成功
      */
-    bool AddGroup();
+    bool AddGroup(InputGroupData* input_group_data);
 
     /**
      * 打包灯光贴图
@@ -151,7 +151,7 @@ extern "C"
      * @param group_json_data 当前Group的JSON数据(原始的JSON数据)
      * @return 是否成功
      */
-    LIGHTMAP_API bool AddGroup(void *packer);
+    LIGHTMAP_API bool AddGroup(void *packer, InputGroupData* input_group_data);
 
     /**
      * 打包灯光贴图

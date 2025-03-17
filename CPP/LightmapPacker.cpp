@@ -74,9 +74,17 @@ public:
         return true;
     }
 
-    bool AddGroup()
+    bool AddGroup(InputGroupData* input_group_data)
     {
-        
+        Log("AddGroup: %s", "开始添加组");
+        Log("AddGroup: %d", input_group_data->rectangle_count);
+        Log("AddGroup: %d", input_group_data->rectangle_width);
+        Log("AddGroup: %d", input_group_data->rectangle_height);
+        for(int i = 0; i < input_group_data->rectangle_count; i++)
+        {
+            Log("AddGroup: %d", input_group_data->rectangle_id[i]);
+        }
+        Log("AddGroup: %s", "组添加完成");
         return true;
     }
 
@@ -143,9 +151,9 @@ bool LightmapPacker::SetTextureSize(int texture_size)
     return pImpl->SetTextureSize(texture_size);
 }
 
-bool LightmapPacker::AddGroup()
+bool LightmapPacker::AddGroup(InputGroupData* input_group_data)
 {
-    return pImpl->AddGroup();
+    return pImpl->AddGroup(input_group_data);
 }
 
 bool LightmapPacker::PackLightmaps()
@@ -201,9 +209,9 @@ extern "C"
         return static_cast<LightmapPacker *>(packer)->SetTextureSize(texture_size);
     }
 
-    bool AddGroup(void *packer)
+    bool AddGroup(void *packer, InputGroupData* input_group_data)
     {
-        return static_cast<LightmapPacker *>(packer)->AddGroup();
+        return static_cast<LightmapPacker *>(packer)->AddGroup(input_group_data);
     }
 
     bool PackLightmaps(void *packer)
