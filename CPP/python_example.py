@@ -27,7 +27,9 @@ def Log(message):
         except UnicodeDecodeError:
             # 如果GBK也解码失败，使用repr显示原始字节
             msg = repr(message)
-    print(msg)
+    print("CPP::" + msg)
+
+default_log_callback = LOGFUNC(Log)
 
 class LightmapPackerPython:
     """
@@ -270,8 +272,7 @@ class LightmapPackerPython:
         self.dll.SetLogCallBack(self.instance, self._log_callback)
 
 def main():
-
-    log_callback = LOGFUNC(Log)
+    log_callback = default_log_callback
 
     lightmap_packer = LightmapPackerPython()
     lightmap_packer.set_log_callback(log_callback)
@@ -279,6 +280,13 @@ def main():
 
     input_group_data = InputGroupData(100, 100, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
     lightmap_packer.add_group(input_group_data)
+
+
+    input_group_data1 = InputGroupData(200, 200, [1, 2, 3, 9, 10])
+    lightmap_packer.add_group(input_group_data1)
+
+    lightmap_packer.pack_lightmaps()
+
 
 if __name__ == "__main__":
     sys.exit(main()) 

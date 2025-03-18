@@ -32,6 +32,7 @@ class InputGroupData(ctypes.Structure):
         arr = (ctypes.c_int * len(ids))(*ids)
         self.rectangle_id = ctypes.cast(arr, ctypes.POINTER(ctypes.c_int))
 
+
 class SingleOutputRectangle(ctypes.Structure):
     _pack_ = 4
     _fields_ = [

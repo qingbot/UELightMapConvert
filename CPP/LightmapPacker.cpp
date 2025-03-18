@@ -11,7 +11,7 @@
 #include <atomic>
 #include <future>
 #include <filesystem>
-#include <cstring> 
+#include <cstring>
 #include <functional>
 
 namespace fs = std::filesystem;
@@ -25,6 +25,116 @@ char *char_merge(const char *left, Args &&...args)
     return result;
 }
 
+struct LightMapInstanceGroup
+{
+    float scale = 1.0f;
+    // 原始的矩形的宽度
+    int source_rectangle_width = 0;
+    int source_rectangle_height = 0;
+
+    int texture_index = -1;
+    // = source_rectangle_width * scale
+    int rectangle_widht = 0;
+    // = source_rectangle_height * scale
+    int rectangle_height = 0;
+
+    int group_instance_count = 0;
+    std::vector<int> rectangles;
+
+    LightMapInstanceGroup() = default;
+    LightMapInstanceGroup(const LightMapInstanceGroup &) = default;
+    LightMapInstanceGroup &operator=(const LightMapInstanceGroup &) = default;
+    LightMapInstanceGroup(LightMapInstanceGroup &&) = default;
+    LightMapInstanceGroup &operator=(LightMapInstanceGroup &&) = default;
+    ~LightMapInstanceGroup() = default;
+
+    LightMapInstanceGroup &operator=(const InputGroupData &other)
+    {
+        group_instance_count = other.rectangle_count;
+        for (int i = 0; i < group_instance_count; i++)
+        {
+            rectangles.push_back(other.rectangle_id[i]);
+        }
+        source_rectangle_width = other.rectangle_width;
+        source_rectangle_height = other.rectangle_height;
+        return *this;
+    }
+};
+
+// 使用TLF算法  顶部左对齐,因为在Vulkan中，纹理的坐标是(0,0)在左上角，所以需要从上到下，从左到右依次排列
+// 以矩形为锚点，每次紧挨着目标矩形，从上到下，从左到右依次排列
+// 放置就是搜索的过程，是否还有空余空间
+// 一旦放下，就不会再拿出来了
+struct LightMapTexture
+{
+    int texture_index = -1;
+    // texture 一定是正方形的
+    int texture_size = 0;
+
+    std::vector<LightMapInstanceGroup *> groups;
+
+    bool TryAddGroup(LightMapInstanceGroup &group)
+    {
+        return false;
+    }
+
+    // 一组矩形是否可以放入到纹理中, 如果group为nullptr，那么就只判断是否可以放入到大小为texture_size的纹理中
+    static bool TryFitSize(int texture_size, int rectangle_width, int rectangle_height, int rectangle_count,
+                           std::vector<LightMapInstanceGroup *> *groups)
+    {
+
+        // 0: 矩形宽度
+        // 1: 矩形高度
+        int* rectangles = nullptr;
+        int pending_index = 0;
+        if(groups == nullptr)
+        {
+            rectangles = new int[rectangle_count * 2];
+        }
+        else
+        {
+            pending_index = groups->size();
+            rectangles = new int[(rectangle_count + groups->size()) * 2];
+            for(int i = 0; i < groups->size(); ++i)
+            {
+                rectangles[i * 2] = (*groups)[i]->source_rectangle_width;
+                rectangles[i * 2 + 1] = (*groups)[i]->source_rectangle_height;
+            }
+        }
+
+        // 当前对角线的起始坐标
+        int current_start_x = 0;
+        int current_start_y = 0;
+        // 当前对角线物体的宽度
+        int current_line_width = 0;
+        // 当前对角线物体的高度
+        int current_line_height = 0;
+
+        int current_width_x = 0;
+        int current_width_y = 0;
+        // 算法的大改示例如下
+        // x 0 0 0
+        // x 0 0 0
+        // x 0 0 0
+        // x x x 0
+        // ========
+        // x x 0 0
+        // x x 0 0
+        // x x x x
+        // x x x x
+        // 按照横，列的顺序一个个填充
+        // 处于对角线上的那个矩形，定义了这行和这列的宽度
+        // 这是货架算法 + BLF算法的结合
+        for(int i = 0; i < rectangle_count; ++i)
+        {
+            
+        }
+
+        delete[] rectangles;
+        return false;
+    }
+};
+
 // 使用PIMPL模式
 class LightmapPackerImpl
 {
@@ -33,6 +143,8 @@ public:
     ~LightmapPackerImpl() {}
 
     int textureSize;
+    // 一个矩形的最小宽度，低于此宽度报错
+    int min_rectangle_width = 1;
 
     std::function<void(const char *)> log_callback;
 
@@ -40,6 +152,8 @@ public:
     float packingEfficiency;
     int textureCount;
     std::vector<OutputGroupData> results;
+
+    std::vector<LightMapInstanceGroup> lightMapInstanceGroups;
 
     // 使用的线程数量
     unsigned int threadCount;
@@ -57,12 +171,12 @@ public:
         }
     }
 
-    template<typename... Args>
-    void Log(const char* format, Args&&... args)
+    template <typename... Args>
+    void Log(const char *format, Args &&...args)
     {
-        if(log_callback)
+        if (log_callback)
         {
-            char* message = char_merge(format, std::forward<Args>(args)...);
+            char *message = char_merge(format, std::forward<Args>(args)...);
             log_callback(message);
             delete[] message;
         }
@@ -74,40 +188,46 @@ public:
         return true;
     }
 
-    bool AddGroup(InputGroupData* input_group_data)
+    bool AddGroup(InputGroupData *input_group_data)
     {
-        Log("AddGroup: %s", "开始添加组");
-        Log("AddGroup: %d", input_group_data->rectangle_count);
-        Log("AddGroup: %d", input_group_data->rectangle_width);
-        Log("AddGroup: %d", input_group_data->rectangle_height);
-        for(int i = 0; i < input_group_data->rectangle_count; i++)
-        {
-            Log("AddGroup: %d", input_group_data->rectangle_id[i]);
-        }
-        Log("AddGroup: %s", "组添加完成");
+        LightMapInstanceGroup lightMapInstanceGroup;
+        lightMapInstanceGroup = *input_group_data;
+        lightMapInstanceGroups.push_back(std::move(lightMapInstanceGroup));
+
+        Log("AddGroup: 组添加完成共有 %d 个矩形, 当前组数量: %d", input_group_data->rectangle_count, lightMapInstanceGroups.size());
         return true;
     }
 
     bool PackLightmaps()
     {
-        auto startTime = std::chrono::high_resolution_clock::now();
+        int group_count = lightMapInstanceGroups.size();
+        if (group_count == 0)
+        {
+            Log("PackLightmaps: 没有组");
+            return true;
+        }
 
-        // 获取系统线程数
-        threadCount = std::thread::hardware_concurrency();
-        Log("使用线程数量: %d", threadCount);
+        // 由大到小排序
+        std::sort(lightMapInstanceGroups.begin(), lightMapInstanceGroups.end(), [](const LightMapInstanceGroup &a, const LightMapInstanceGroup &b)
+                  { return a.source_rectangle_height > b.source_rectangle_height; });
 
-        // TODO: 实现实际的灯光贴图打包算法
-        // 1. 加载JSON数据
-        // 2. 按参数分组
-        // 3. 应用模拟退火或传统算法进行打包
-        // 4. 保存结果
+        for (int i = 0; i < group_count; i++)
+        {
+            Log("PackLightmaps: 组 %d 宽度: %d 高度: %d", i, lightMapInstanceGroups[i].source_rectangle_width, lightMapInstanceGroups[i].source_rectangle_height);
+        }
 
-        // 模拟处理时间和结果
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        // auto startTime = std::chrono::high_resolution_clock::now();
 
-        auto endTime = std::chrono::high_resolution_clock::now();
-        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
-        Log("处理完成，耗时: %d 毫秒", duration.count());
+        // // 获取系统线程数
+        // threadCount = std::thread::hardware_concurrency();
+        // Log("使用线程数量: %d", threadCount);
+
+        // // 模拟处理时间和结果
+        // std::this_thread::sleep_for(std::chrono::seconds(1));
+
+        // auto endTime = std::chrono::high_resolution_clock::now();
+        // auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(endTime - startTime);
+        // Log("处理完成，耗时: %d 毫秒", duration.count());
 
         return true;
     }
@@ -140,112 +260,99 @@ public:
         Log("测试日志 %d %s", 123, "Hello");
     }
 
+    bool CaculateMaxGroupScale()
+    {
+        for (int i = 0; i < lightMapInstanceGroups.size(); i++)
+        {
+            float scale = 1.0f;
+            LightMapInstanceGroup &group = lightMapInstanceGroups[i];
+
+            int source_width = group.source_rectangle_width;
+            int source_height = group.source_rectangle_height;
+            int group_instance_count = group.group_instance_count;
+            int current_width = source_width;
+            int current_height = source_height;
+
+            while (true)
+            {
+                current_width = source_width * scale;
+                current_height = source_height * scale;
+
+                if (current_width <= min_rectangle_width)
+                {
+                    Log("CaculateMaxGroupScale: 矩形%d 宽度 %d 低于最小宽度 %d", group.rectangles[0], current_width, min_rectangle_width);
+                    return false;
+                }
+
+                // if (LightMapTexture::TryFitSize(textureSize, textureSize,
+                //                                 current_width, current_height,
+                //                                 group_instance_count))
+                // {
+                //     group.scale = scale;
+                //     group.rectangle_widht = current_width;
+                //     group.rectangle_height = current_height;
+                //     break;
+                // }
+                scale *= 0.5f;
+            }
+        }
+    }
 };
-
-LightmapPacker::LightmapPacker() : pImpl(std::make_unique<LightmapPackerImpl>()) {}
-
-LightmapPacker::~LightmapPacker() = default;
-
-bool LightmapPacker::SetTextureSize(int texture_size)
-{
-    return pImpl->SetTextureSize(texture_size);
-}
-
-bool LightmapPacker::AddGroup(InputGroupData* input_group_data)
-{
-    return pImpl->AddGroup(input_group_data);
-}
-
-bool LightmapPacker::PackLightmaps()
-{
-    return pImpl->PackLightmaps();
-}
-
-int LightmapPacker::GetTextureCount() const
-{
-    return pImpl->GetTextureCount();
-}
-
-float LightmapPacker::GetPackingEfficiency() const
-{
-    return pImpl->GetPackingEfficiency();
-}
-
-int LightmapPacker::GetResultCount() const
-{
-    return pImpl->GetResultCount();
-}
-
-int LightmapPacker::GetResult(OutputGroupData *output_group_data) const
-{
-    return pImpl->GetResult(output_group_data);
-}
-
-void LightmapPacker::TestLog() const
-{
-    pImpl->TestLog();
-}
-
-void LightmapPacker::SetLogCallBack(void (*log_callback)(const char *message))
-{
-    pImpl->SetLogCallBack(log_callback);
-}
-
 // C语言接口
 extern "C"
 {
     void *CreateLightmapPacker()
     {
-        return new LightmapPacker();
+        return new LightmapPackerImpl();
     }
 
     void DestroyLightmapPacker(void *packer)
     {
-        delete static_cast<LightmapPacker *>(packer);
+        delete static_cast<LightmapPackerImpl *>(packer);
     }
 
     bool SetTextureSize(void *packer, int texture_size)
     {
-        return static_cast<LightmapPacker *>(packer)->SetTextureSize(texture_size);
+        return static_cast<LightmapPackerImpl *>(packer)->SetTextureSize(texture_size);
     }
 
-    bool AddGroup(void *packer, InputGroupData* input_group_data)
+    bool AddGroup(void *packer, InputGroupData *input_group_data)
     {
-        return static_cast<LightmapPacker *>(packer)->AddGroup(input_group_data);
+        return static_cast<LightmapPackerImpl *>(packer)->AddGroup(input_group_data);
     }
 
     bool PackLightmaps(void *packer)
     {
-        return static_cast<LightmapPacker *>(packer)->PackLightmaps();
+        return static_cast<LightmapPackerImpl *>(packer)->PackLightmaps();
     }
 
     int GetTextureCount(void *packer)
     {
-        return static_cast<LightmapPacker *>(packer)->GetTextureCount();
+        return static_cast<LightmapPackerImpl *>(packer)->GetTextureCount();
     }
 
     float GetPackingEfficiency(void *packer)
     {
-        return static_cast<LightmapPacker *>(packer)->GetPackingEfficiency();
+        return static_cast<LightmapPackerImpl *>(packer)->GetPackingEfficiency();
     }
 
     int GetResultCount(void *packer)
     {
-        return static_cast<LightmapPacker *>(packer)->GetResultCount();
+        return static_cast<LightmapPackerImpl *>(packer)->GetResultCount();
     }
 
     int GetResult(void *packer, OutputGroupData *output_group_data)
     {
-        return static_cast<LightmapPacker *>(packer)->GetResult(output_group_data);
+        return static_cast<LightmapPackerImpl *>(packer)->GetResult(output_group_data);
     }
 
     void TestLog(void *packer)
     {
-        static_cast<LightmapPacker *>(packer)->TestLog();
+        static_cast<LightmapPackerImpl *>(packer)->TestLog();
     }
 
     void SetLogCallBack(void *packer, void (*log_callback)(const char *message))
     {
-        static_cast<LightmapPacker *>(packer)->SetLogCallBack(log_callback);
+        static_cast<LightmapPackerImpl *>(packer)->SetLogCallBack(log_callback);
     }
 }

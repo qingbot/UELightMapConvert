@@ -59,67 +59,6 @@ struct LIGHTMAP_API OutputGroupData
 };
 #pragma pack(pop)
 
-/**
- * 灯光贴图打包器
- */
-class LIGHTMAP_API LightmapPacker
-{
-public:
-    LightmapPacker();
-    ~LightmapPacker();
-
-    /**
-     * 设置纹理的大小
-     * @param texture_size 纹理的大小(像素)
-     * @return 是否成功
-     */
-    bool SetTextureSize(int texture_size);
-
-    /**
-     * 添加一个Group
-     * @param group_key 当前Group的key
-     * @param group_json_data 当前Group的JSON数据(原始的JSON数据)
-     * @return 是否成功
-     */
-    bool AddGroup(InputGroupData* input_group_data);
-
-    /**
-     * 打包灯光贴图
-     * @return 是否成功
-     */
-    bool PackLightmaps();
-
-    /**
-     * 获取打包的纹理数量
-     * @return 打包的纹理数量
-     */
-    int GetTextureCount() const;
-
-    /**
-     * 获取打包的效率
-     * @return 打包的效率
-     */
-    float GetPackingEfficiency() const;
-
-    /**
-     * 获取打包的结果数量
-     * @return 打包的结果数量
-     */
-    int GetResultCount() const;
-
-    int GetResult(OutputGroupData* output_group_data) const;
-
-    void TestLog() const;
-
-    /**
-     * 设置日志回调函数
-     * @param log_callback 回调函数指针
-     */
-    void SetLogCallBack(void (*log_callback)(const char *message));
-
-private:
-    std::unique_ptr<LightmapPackerImpl> pImpl; // PIMPL模式
-};
 
 // C语言接口
 extern "C"

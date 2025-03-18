@@ -32,7 +32,9 @@ import GlobalParameter
 # 从CPP目录导入C++ DLL包装类
 sys.path.append(os.path.join(os.path.dirname(__file__), "CPP"))
 
-from CPP.python_example import LightmapPackerPython
+from python_example import LightmapPackerPython, default_log_callback
+from lightmap_structures import InputGroupData
+from lightmap_structures import OutputGroupData
 
 
 # 从ReCode_LQ.py提取的关键类和函数
@@ -51,6 +53,32 @@ def get_lightmap_path(scene_name):
     """获取场景的灯光贴图路径"""
     return GlobalParameter.ALL_LIGHT_MAP_DATA[scene_name]["source_lightmap_json_path"]
 
+def get_lightmap_size_from_bias_scale(bias_scale,texture_size):
+    """根据bias_scale计算灯光贴图的尺寸"""
+    # 原始数组在计算BiasScale时，为了linear采样，将biasscale向内收缩了，所以需要向外扩展
+    # 计算的C++代码如下
+    # if ((PaddedSizeX - 2 > 0) && ((PaddedSizeY - 2) > 0))
+    # {
+    # 	PaddedSizeX -= 2;
+    # 	PaddedSizeY -= 2;
+    # 	BaseX += 1;
+    # 	BaseY += 1;
+    # }
+    # FVector2D Scale((float)PaddedSizeX / (float)GetSizeX(), (float)PaddedSizeY / (float)GetSizeY());
+    # FVector2D Bias((float)BaseX / (float)GetSizeX(), (float)BaseY / (float)GetSizeY());
+    
+    # 图片的下半部分是其他数据，上半部分才是我需要的物体，所以需要裁剪
+    padded_size_x = texture_size[0] * bias_scale[2] + 2
+    padded_size_y = texture_size[1] * bias_scale[3] * 0.5 + 2
+
+    base_x = texture_size[0] * ( 0 + bias_scale[0] ) + 1
+    base_y = texture_size[1] * ( 0 + bias_scale[1] ) * 0.5 + 1
+
+    return padded_size_x, padded_size_y, base_x, base_y
+    
+    
+    
+
 def extract_lightmap(lightmap_path, bias_scale):
     """根据bias_scale提取灯光贴图"""
     if not os.path.exists(lightmap_path):
@@ -66,15 +94,15 @@ def extract_lightmap(lightmap_path, bias_scale):
         if not bias_scale or len(bias_scale) < 4:
             return img_array
         
-        # 提取部分图像
         u_min, v_min, width, height = bias_scale
         img_height, img_width = img_array.shape[:2]
         
-        x_min = int(u_min * img_width)
-        y_min = int(v_min * img_height)
-        x_max = int((u_min + width) * img_width)
-        y_max = int((v_min + height) * img_height)
-        
+        padded_size_x, padded_size_y, base_x, base_y = get_lightmap_size_from_bias_scale(bias_scale,  img_array.shape[:2])
+
+        x_min = int(base_x )
+        y_min = int(base_y )
+        x_max = int((base_x + padded_size_x))
+        y_max = int((base_y + padded_size_y))
         # 边界检查
         x_min = max(0, min(x_min, img_width - 1))
         y_min = max(0, min(y_min, img_height - 1))
@@ -85,6 +113,7 @@ def extract_lightmap(lightmap_path, bias_scale):
     except Exception as e:
         print(f"提取灯光贴图时出错: {lightmap_path}, 错误: {e}")
         return np.zeros((64, 64, 4), dtype=np.uint8)
+    
 
 def group_by_parameters(json_data):
     """按模型URL参数分组物体"""
@@ -189,81 +218,6 @@ def group_by_parameters(json_data):
                 "mesh_json_url": mesh_json_url, # 保存原始URL信息
                 "mesh_data_url": mesh_data_url
             })
-    # 其他格式处理...
-    elif "actors" in json_data:
-        # 处理包含在actors键下的格式
-        print("检测到'actors'格式的JSON...")
-        for actor_name, actor_data in json_data["actors"].items():
-            # 检查物体是否有Parameters和Lightmap
-            parameters = actor_data.get("Parameters", {})
-            lightmap_info = actor_data.get("LightMap", {})
-            
-            # 如果没有Parameters或Lightmap信息，则跳过
-            if not parameters or not lightmap_info:
-                continue
-            
-            # 获取mesh URL信息
-            mesh_json_url = parameters.get("MeshJsonURL", "")
-            mesh_data_url = parameters.get("MeshDataURL", "")
-            
-            if not mesh_json_url or not mesh_data_url:
-                continue
-            
-            # 创建分组键 (使用mesh URL作为键)
-            group_key = f"{mesh_json_url}|{mesh_data_url}"
-            
-            # 获取Lightmap信息
-            bias_scale = lightmap_info.get("BiasScale", [])
-            lightmap_lq = lightmap_info.get("LQ", "")
-            lightmap_hq = lightmap_info.get("HQ", "")
-            
-            # 如果没有必要的灯光贴图信息，则跳过
-            if not bias_scale or len(bias_scale) < 4 or not lightmap_lq:
-                continue
-            
-            if group_key not in groups:
-                groups[group_key] = []
-            
-            # 添加到分组
-            groups[group_key].append({
-                "mesh_id": actor_name,  # 使用物体名称作为ID
-                "name": actor_data.get("Name", actor_name),  # 显示用的名称
-                "lightmap_lq": lightmap_lq,  # 灯光贴图LQ路径
-                "lightmap_hq": lightmap_hq,    # 灯光贴图HQ路径
-                "bias_scale": bias_scale,      # BiasScale参数
-                "mesh_json_url": mesh_json_url, # 保存原始URL信息
-                "mesh_data_url": mesh_data_url
-            })
-    else:
-        # 兼容旧版JSON结构
-        print("检测到旧版JSON格式...")
-        for item in json_data.get("world_mesh_renderers", []):
-            mesh_id = item.get("mesh_id", "")
-            material_info = item.get("lightMapMaterialInfo", {})
-            
-            if not material_info:
-                continue
-            
-            bias_scale = material_info.get("bias_scale", [])
-            if not bias_scale or len(bias_scale) < 4:
-                continue
-            
-            lightmap_path = material_info.get("lq", "")
-            if not lightmap_path:
-                continue
-            
-            # 使用mesh_id作为分组键，因为旧版本没有Parameters
-            group_key = mesh_id.split("_")[0] if "_" in mesh_id else mesh_id
-            
-            if group_key not in groups:
-                groups[group_key] = []
-            
-            groups[group_key].append({
-                "mesh_id": mesh_id,
-                "name": item.get("name", ""),
-                "lightmap_lq": lightmap_path,
-                "bias_scale": bias_scale
-            })
     
     # 打印分组结果统计
     total_items = sum(len(items) for items in groups.values())
@@ -335,35 +289,6 @@ def update_json_data(json_data, new_lightmap_info):
                     actor_data["LightMap"]["LQ"] = info["new_lq"]
                     # 更新BiasScale
                     actor_data["LightMap"]["BiasScale"] = info["new_bias_scale"]
-                    updated_count += 1
-    elif "actors" in json_data:
-        # 新格式JSON
-        print("更新'actors'格式的JSON...")
-        for actor_name, actor_data in json_data["actors"].items():
-            if actor_name in new_lightmap_info:
-                info = new_lightmap_info[actor_name]
-                
-                # 如果存在LightMap字段
-                if "LightMap" in actor_data:
-                    # 更新灯光贴图路径
-                    actor_data["LightMap"]["LQ"] = info["new_lq"]
-                    # 更新BiasScale
-                    actor_data["LightMap"]["BiasScale"] = info["new_bias_scale"]
-                    updated_count += 1
-    else:
-        # 旧格式JSON
-        print("更新旧版JSON格式...")
-        for item in json_data.get("world_mesh_renderers", []):
-            mesh_id = item.get("mesh_id", "")
-            if mesh_id in new_lightmap_info:
-                info = new_lightmap_info[mesh_id]
-                
-                # 如果存在material_info字段
-                if "lightMapMaterialInfo" in item:
-                    # 更新灯光贴图路径
-                    item["lightMapMaterialInfo"]["lq"] = info["new_lq"]
-                    # 更新bias_scale
-                    item["lightMapMaterialInfo"]["bias_scale"] = info["new_bias_scale"]
                     updated_count += 1
     
     print(f"已更新 {updated_count} 个物体的灯光贴图信息")
@@ -561,8 +486,8 @@ def main():
                         help="灯光贴图目录路径")
     parser.add_argument("--output", type=str, default=None,
                         help="输出目录路径，默认为./output/lightmaps")
-    parser.add_argument("--algorithm", type=str, choices=["simulated_annealing", "traditional"],
-                        default="simulated_annealing", help="打包算法")
+    # parser.add_argument("--algorithm", type=str, choices=["simulated_annealing", "traditional"],
+    #                     default="simulated_annealing", help="打包算法")
     parser.add_argument("--texture-size", type=int, default=4096,
                         help="输出纹理大小，默认为4096")
     parser.add_argument("--min-texture-size", type=int, default=32,
@@ -616,7 +541,7 @@ def main():
             return
         
         # 步骤2.5: 计算每个物体实际需要的lightmap大小
-        print("步骤2.5: 计算每个物体的lightmap实际大小...")
+        # print("步骤2.5: 计算每个物体的lightmap实际大小...")
         # 获取灯光贴图基础路径
         lightmap_base_dir = args.lightmap
         if args.scene in GlobalParameter.ALL_LIGHT_MAP_DATA:
@@ -651,27 +576,20 @@ def main():
                     img_width, img_height = img.size
                     
                     # 计算实际的UV区域，y坐标和高度需要考虑只使用上半部分
-                    u_min, v_min, width, height = bias_scale
+                    # u_min, v_min, width, height = bias_scale
                     
+                    padded_size_x, padded_size_y, base_x, base_y = get_lightmap_size_from_bias_scale(bias_scale, img.size)
                     # 注意：贴图只使用上半部分，所以v坐标和高度都需要乘以0.5
-                    v_min = v_min * 0.5
-                    height = height * 0.5
-                    
-                    # 计算实际的像素尺寸
-                    x_min = int(u_min * img_width)
-                    y_min = int(v_min * img_height)
-                    x_max = int((u_min + width) * img_width)
-                    y_max = int((v_min + height) * img_height)
                     
                     # 计算宽高
-                    pixel_width = x_max - x_min
-                    pixel_height = y_max - y_min
+                    pixel_width = int(padded_size_x)
+                    pixel_height = int(padded_size_y)
                     
                     # 确保最小尺寸
                     pixel_width = max(pixel_width, args.min_texture_size)
                     pixel_height = max(pixel_height, args.min_texture_size)
                     
-                    # 添加到组的矩形列表
+                    # 添加到组的矩形列表，增加rectangle_id字段
                     group_rectangles[group_key].append({
                         "mesh_id": mesh_id,
                         "name": item.get("name", mesh_id),
@@ -679,20 +597,23 @@ def main():
                         "original_bias_scale": bias_scale,
                         "width": pixel_width,
                         "height": pixel_height,
+                        "rectangle_id": int(hash(mesh_id)),  # 为每个矩形添加ID
                     })
                     
                 except Exception as e:
                     print(f"警告: 处理 {mesh_id} 的灯光贴图时出错: {e}")
-                    # 使用默认值
-                    group_rectangles[group_key].append({
-                        "mesh_id": mesh_id,
-                        "name": item.get("name", mesh_id),
-                        "lightmap_lq": lightmap_lq,
-                        "lightmap_hq": item.get("lightmap_hq", ""),
-                        "original_bias_scale": bias_scale,
-                        "width": args.min_texture_size,
-                        "height": args.min_texture_size,
-                    })
+                    raise e
+                    # # 使用默认值
+                    # group_rectangles[group_key].append({
+                    #     "mesh_id": mesh_id,
+                    #     "name": item.get("name", mesh_id),
+                    #     "lightmap_lq": lightmap_lq,
+                    #     # "lightmap_hq": item.get("lightmap_hq", ""),
+                    #     "original_bias_scale": bias_scale,
+                    #     "width": args.min_texture_size,
+                    #     "height": args.min_texture_size,
+                    #     "rectangle_id": hash(mesh_id),
+                    # })
         
         print(f"已计算 {sum(len(rects) for rects in group_rectangles.values())} 个物体的lightmap大小")
 
@@ -705,32 +626,32 @@ def main():
             print("成功加载LightmapPacker DLL")
         except Exception as e:
             print(f"加载LightmapPacker DLL失败: {e}")
-            # print("切换到纯Python实现。警告: 性能可能会较低")
-            # 这里可以添加备用的Python实现
-            # ...
             return
         
+        packer.set_log_callback(default_log_callback)
+        
         # 设置DLL参数
-        packer.set_json_path(args.json)
-        packer.set_lightmap_path(lightmap_base_dir)
-        packer.set_output_path(args.output)
         packer.set_texture_size(args.texture_size)
         
         # 向C++传递组和矩形信息
         print(f"向C++传递 {len(group_rectangles)} 个组的矩形信息...")
-        
+
         for group_key, rectangles in group_rectangles.items():
-            if not packer.add_group(group_key, rectangles):
+            if not rectangles:
+                continue
+            # 创建一个列表来存储矩形ID
+            rectangle_ids = [rectangle["rectangle_id"] for rectangle in rectangles]
+            print(f"添加组 '{group_key}' 到C++，矩形ID: {rectangle_ids}")
+            cpp_input_group_data = InputGroupData(rectangles[0]["width"], rectangles[0]["height"], rectangle_ids)
+            if not packer.add_group(cpp_input_group_data):
                 print(f"警告: 添加组 '{group_key}' 到C++失败")
         
-        # 执行打包
-        use_simulated_annealing = args.algorithm == "simulated_annealing"
-        print(f"开始执行贴图打包，使用{args.algorithm}算法...")
-        
-        if not packer.pack_lightmaps(use_simulated_annealing):
+        if not packer.pack_lightmaps():
             print("贴图打包失败")
             return
         
+        print("test over")
+        return
         # 获取结果
         texture_count = packer.get_texture_count()
         packing_efficiency = packer.get_packing_efficiency()
