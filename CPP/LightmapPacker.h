@@ -27,7 +27,19 @@ struct LIGHTMAP_API InputGroupData
     int rectangle_height;
 
     // 所有的矩形的id，在python侧声明，数量 = rectangle_count
-    int* rectangle_id;
+    int *rectangle_id;
+};
+
+struct SingleOutPutRectangle
+{
+    // 当前Group使用的矩形在纹理中的x坐标
+    int position_x;
+    // 当前Group使用的矩形在纹理中的y坐标
+    int position_y;
+    int width;
+    int height;
+    // 当前Group使用的矩形的id
+    int rectangle_id;
 };
 
 struct LIGHTMAP_API OutputGroupData
@@ -42,23 +54,32 @@ struct LIGHTMAP_API OutputGroupData
     // 当前Group使用的矩形的高度 = 原始的rectangle_height * scale
     int single_rectangle_height;
 
-    struct SingleOutPutRectangle{
-        // 当前Group使用的矩形在纹理中的x坐标
-        int position_x;
-        // 当前Group使用的矩形在纹理中的y坐标
-        int position_y;
-        // 当前Group使用的矩形的id
-        int rectangle_id;
-    };
-
     // 当前Group使用的矩形的数量
     int group_instance_count;
 
     // 当前group的每一个矩形 数量 = group_instance_count
-    SingleOutPutRectangle* rectangles;
+    SingleOutPutRectangle *rectangles;
 };
-#pragma pack(pop)
 
+struct LIGHTMAP_API OutLightMapTexture
+{
+    // 当前纹理的index
+    int texture_index;
+
+    // 当前纹理的宽度
+    int texture_width;
+
+    // 当前纹理的高度
+    int texture_height;
+
+    // 当前纹理的矩形数量
+    int rectangle_count;
+
+    // 当前纹理的矩形 数量 = rectangle_count
+    SingleOutPutRectangle *rectangles;
+};
+
+#pragma pack(pop)
 
 // C语言接口
 extern "C"
@@ -90,7 +111,7 @@ extern "C"
      * @param group_json_data 当前Group的JSON数据(原始的JSON数据)
      * @return 是否成功
      */
-    LIGHTMAP_API bool AddGroup(void *packer, InputGroupData* input_group_data);
+    LIGHTMAP_API bool AddGroup(void *packer, InputGroupData *input_group_data);
 
     /**
      * 打包灯光贴图
@@ -114,16 +135,11 @@ extern "C"
      */
     LIGHTMAP_API float GetPackingEfficiency(void *packer);
 
-    /**
-     * 获取打包的结果数量
-     * @param packer LightmapPacker
-     * @return 打包的结果数量
-     */
-    LIGHTMAP_API int GetResultCount(void *packer);
+    // 获取对应纹理，拥有的矩形的数量，返回-1则表示没有这张图，获取结束
+    LIGHTMAP_API int GetTextureRectangleCount(void *packer,int textureID);
 
-    /**
-     */
-    LIGHTMAP_API int GetResult(void *packer, OutputGroupData* output_group_data);
+    // 获取对应纹理，拥有的矩形
+    LIGHTMAP_API bool GetTextureResult(void *packer, int textureID, OutLightMapTexture *output_group_data);
 
     /**
      * 测试日志

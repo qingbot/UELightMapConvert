@@ -27,6 +27,8 @@ from datetime import datetime
 from pathlib import Path
 import sys
 import traceback
+import hashlib
+import struct
 from typing import Dict, List, Tuple, Any
 import GlobalParameter
 # 从CPP目录导入C++ DLL包装类
@@ -36,6 +38,46 @@ from python_example import LightmapPackerPython, default_log_callback
 from lightmap_structures import InputGroupData
 from lightmap_structures import OutputGroupData
 
+
+# 创建一个全局字典用于存储矩形ID映射
+rectangle_id_map = {}
+# 全局计数器用于生成顺序ID
+rectangle_id_counter = 1
+
+def generate_sequential_id(mesh_id, info=None):
+    """生成简单的顺序ID，并维护映射用于后续查找
+    
+    Args:
+        mesh_id: 物体ID/名称
+        group_key: 组键值
+        
+    Returns:
+        一个简单的整数ID
+    """
+    global rectangle_id_counter
+
+    # 分配新ID
+    new_id = rectangle_id_counter
+    rectangle_id_counter += 1
+    
+    # 创建反向映射用于查找
+    rectangle_id_map[new_id] = info
+    
+    return new_id
+
+def get_mesh_id_by_rect_id(rect_id):
+    """通过矩形ID查找对应的mesh_id
+    
+    Args:
+        rect_id: 矩形ID
+        
+    Returns:
+        对应的mesh_id，如果找不到则返回None
+    """
+    if rect_id in rectangle_id_map:
+        info = rectangle_id_map[rect_id]
+        return info["mesh_id"] if isinstance(info, dict) and "mesh_id" in info else None
+    return None
 
 # 从ReCode_LQ.py提取的关键类和函数
 def get_new_json_path():
@@ -300,43 +342,58 @@ def save_packing_results_to_json(results, groups_data, output_path=None):
         output_path = f"packing_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
     
     output_data = {
-        "texture_count": len(set(r["texture_index"] for r in results)),
-        "total_items": len(results),
+        "texture_count": len(results),
+        "total_items": sum(result.rectangle_count for result in results),
         "textures": {}
     }
     
     # 按纹理索引组织数据
-    for result in results:
-        texture_idx = result["texture_index"]
+    for texture in results:
+        texture_idx = texture.texture_index
         if str(texture_idx) not in output_data["textures"]:
-            output_data["textures"][str(texture_idx)] = []
+            output_data["textures"][str(texture_idx)] = {
+                "width": texture.texture_width,
+                "height": texture.texture_height,
+                "rectangle_count": texture.rectangle_count,
+                "rectangles": []
+            }
         
-        # 获取组信息
-        group_info = None
-        for group in groups_data:
-            for item in groups_data[group]:
-                if item["mesh_id"] == result["mesh_id"]:
-                    group_info = {
-                        "group": group,
-                        "original_bias_scale": item["bias_scale"],
-                        "original_lightmap_lq": item["lightmap_lq"],
-                        "original_lightmap_hq": item["lightmap_hq"]
-                    }
+        # 获取该纹理中的所有矩形
+        for i in range(texture.rectangle_count):
+            rect = texture.rectangles[i]
+            rect_id = rect.rectangle_id
+            
+            # 直接从ID映射中获取原始lightmap信息
+            if rect_id not in rectangle_id_map:
+                print(f"警告: 在保存JSON时找不到矩形ID {rect_id} 对应的lightmap信息")
+                continue
+                
+            # 获取原始信息
+            original_info = rectangle_id_map[rect_id]
+            mesh_id = original_info["mesh_id"]
+            
+            # 寻找对应的组
+            group_key = None
+            for g_key, items in groups_data.items():
+                for item in items:
+                    if item["mesh_id"] == mesh_id:
+                        group_key = g_key
+                        break
+                if group_key:
                     break
-            if group_info:
-                break
-        
-        # 添加到输出数据
-        output_data["textures"][str(texture_idx)].append({
-            "mesh_id": result["mesh_id"],
-            "name": result["name"],
-            "new_lightmap": result["new_lq"],
-            "new_bias_scale": result["new_bias_scale"],
-            "scale_factor": result["scale_factor"],
-            "position": list(result["position"]),
-            "size": list(result["size"]),
-            "group_info": group_info
-        })
+            
+            # 添加到输出数据
+            output_data["textures"][str(texture_idx)]["rectangles"].append({
+                "mesh_id": mesh_id,
+                "name": original_info.get("name", mesh_id),
+                "position": [rect.position_x, rect.position_y],
+                "width": rect.width,
+                "height": rect.height,
+                "rectangle_id": rect_id,
+                "original_lightmap_lq": original_info.get("lightmap_lq", ""),
+                "original_bias_scale": original_info.get("original_bias_scale", []),
+                "group_key": group_key
+            })
     
     # 保存到文件
     with open(output_path, 'w', encoding='utf-8') as f:
@@ -346,63 +403,64 @@ def save_packing_results_to_json(results, groups_data, output_path=None):
     return output_path
 
 def process_and_save_packed_textures(results, group_rectangles, texture_size=4096, output_dir=None, lightmap_base_dir=None):
-    """根据C++返回的布局信息处理并保存打包后的纹理"""
+    """根据C++返回的布局信息处理并保存打包后的纹理，更新BiasScale信息"""
     if output_dir is None:
         output_dir = "packed_lightmaps"
     
     os.makedirs(output_dir, exist_ok=True)
     
-    # 确定需要创建的纹理数量
-    texture_count = max([r["texture_index"] for r in results], default=0) + 1
+    # 确保lightmap_base_dir存在
+    if not lightmap_base_dir:
+        lightmap_base_dir = "."
     
     # 创建空白纹理
     packed_textures = []
-    for _ in range(texture_count):
-        # 创建RGBA纹理，初始为全透明
-        texture = np.zeros((texture_size, texture_size, 4), dtype=np.uint8)
-        packed_textures.append(texture)
+    for texture in results:
+        # 创建指定大小的RGBA纹理，初始为全透明
+        texture_array = np.zeros((texture.texture_height, texture.texture_width, 4), dtype=np.uint8)
+        packed_textures.append({
+            "texture_index": texture.texture_index,
+            "width": texture.texture_width,
+            "height": texture.texture_height,
+            "array": texture_array,
+            "rectangles": []
+        })
     
-    # 按纹理索引对结果分组
-    results_by_texture = {}
-    for r in results:
-        texture_idx = r["texture_index"]
-        if texture_idx not in results_by_texture:
-            results_by_texture[texture_idx] = []
-        results_by_texture[texture_idx].append(r)
+    # 用于返回更新的lightmap信息
+    updated_lightmap_info = {}
     
-    # 处理每个纹理
-    for texture_idx, items in results_by_texture.items():
-        print(f"处理纹理 {texture_idx}，包含 {len(items)} 个项目")
+    # 处理每个纹理和其中的矩形
+    for texture_idx, texture_info in enumerate(packed_textures):
+        texture = results[texture_idx]
+        print(f"处理纹理 {texture.texture_index}，包含 {texture.rectangle_count} 个矩形")
         
-        for item in items:
-            mesh_id = item["mesh_id"]
+        # 遍历该纹理中的所有矩形
+        for i in range(texture.rectangle_count):
+            rect = texture.rectangles[i]
+            rect_id = rect.rectangle_id
             
-            # 查找原始灯光贴图信息
-            original_info = None
-            
-            # 在所有组中查找该物体的信息
-            for group_key, rectangles in group_rectangles.items():
-                for rect in rectangles:
-                    if rect["mesh_id"] == mesh_id:
-                        original_info = rect
-                        break
-                if original_info:
-                    break
-            
-            if not original_info:
-                print(f"警告: 找不到物体 {mesh_id} 的原始信息，跳过")
+            # 直接从ID映射中获取原始lightmap信息
+            if rect_id not in rectangle_id_map:
+                print(f"警告: 找不到矩形ID {rect_id} 对应的lightmap信息，跳过")
                 continue
+                
+            # 获取原始的lightmap信息
+            original_info = rectangle_id_map[rect_id]
+            mesh_id = original_info["mesh_id"]
             
             # 获取原始灯光贴图路径
             lightmap_lq = original_info["lightmap_lq"]
             
             # 获取完整的灯光贴图路径
             if not os.path.isabs(lightmap_lq):
-                full_lightmap_path = os.path.join(lightmap_base_dir, lightmap_lq)
+                # 检查是否需要添加.png后缀
+                if not lightmap_lq.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    full_lightmap_path = os.path.join(lightmap_base_dir, lightmap_lq + ".png")
+                else:
+                    full_lightmap_path = os.path.join(lightmap_base_dir, lightmap_lq)
             else:
                 full_lightmap_path = lightmap_lq
             
-            print(f"处理物体 {mesh_id} 的灯光贴图: {full_lightmap_path}")
             
             # 获取原始的bias_scale
             original_bias_scale = original_info["original_bias_scale"]
@@ -413,19 +471,16 @@ def process_and_save_packed_textures(results, group_rectangles, texture_size=409
                 img_array = np.array(img)
                 img_height, img_width = img_array.shape[:2]
                 
-                # 提取原始灯光贴图的区域
-                # 计算UV区域，注意y坐标和高度需要乘以0.5
-                u_min, v_min, width, height = original_bias_scale
+                # 从原始灯光贴图中提取区域
+                # 使用get_lightmap_size_from_bias_scale计算实际位置和大小
+                padded_size_x, padded_size_y, base_x, base_y = get_lightmap_size_from_bias_scale(
+                    original_bias_scale, (img_width, img_height))
                 
-                # 应用0.5缩放到v坐标和高度
-                v_min = v_min * 0.5
-                height = height * 0.5
-                
-                # 计算像素坐标
-                x_min = int(u_min * img_width)
-                y_min = int(v_min * img_height)
-                x_max = int((u_min + width) * img_width)
-                y_max = int((v_min + height) * img_height)
+                # 计算像素坐标（注意y坐标和高度只使用上半部分）
+                x_min = int(base_x)
+                y_min = int(base_y)
+                x_max = int(x_min + padded_size_x)
+                y_max = int(y_min + padded_size_y)
                 
                 # 边界检查
                 x_min = max(0, min(x_min, img_width - 1))
@@ -436,47 +491,89 @@ def process_and_save_packed_textures(results, group_rectangles, texture_size=409
                 # 提取区域
                 rect_region = img_array[y_min:y_max, x_min:x_max]
                 
-                # 应用缩放（如果需要）
-                scale_factor = item.get("scale_factor", 1.0)
-                if scale_factor != 1.0:
-                    new_height = int(rect_region.shape[0] * scale_factor)
-                    new_width = int(rect_region.shape[1] * scale_factor)
-                    
-                    if new_height > 0 and new_width > 0:
-                        # 使用PIL进行更高质量的缩放
-                        resized_img = Image.fromarray(rect_region)
-                        resized_img = resized_img.resize((new_width, new_height), Image.LANCZOS)
-                        rect_region = np.array(resized_img)
-                    else:
-                        print(f"警告: 缩放因子 {scale_factor} 导致尺寸无效，跳过缩放")
+                # 确保提取的区域与目标大小匹配（可能需要缩放）
+                target_width = rect.width
+                target_height = rect.height
+                if rect_region.shape[0] != target_height or rect_region.shape[1] != target_width:
+                    # 使用PIL进行高质量缩放
+                    resized_img = Image.fromarray(rect_region)
+                    resized_img = resized_img.resize((target_width, target_height), Image.LANCZOS)
+                    rect_region = np.array(resized_img)
                 
                 # 获取在打包纹理中的位置
-                target_x, target_y = item["position"]
+                target_x = rect.position_x
+                target_y = rect.position_y
                 
                 # 确保不会超出边界
                 try:
                     h, w = rect_region.shape[:2]
                     
-                    if target_x + w <= texture_size and target_y + h <= texture_size:
+                    if target_x + w <= texture_info["width"] and target_y + h <= texture_info["height"]:
                         # 将提取的区域复制到目标纹理
-                        packed_textures[texture_idx][target_y:target_y+h, target_x:target_x+w] = rect_region
+                        texture_info["array"][target_y:target_y+h, target_x:target_x+w] = rect_region
+                        
+                        # 计算新的BiasScale (基于打包纹理的UV坐标)
+                        texture_width = texture_info["width"]
+                        texture_height = texture_info["height"]
+                        new_bias_scale = [
+                            float(target_x) / texture_width,      # u_min
+                            float(target_y) / texture_height,     # v_min
+                            float(w) / texture_width,             # width
+                            float(h) / texture_height             # height
+                        ]
+                        
+                        # 记录矩形信息
+                        texture_info["rectangles"].append({
+                            "mesh_id": mesh_id,
+                            "position": (target_x, target_y),
+                            "size": (w, h),
+                            "rectangle_id": rect_id
+                        })
+                        
+                        # 生成新的贴图路径 - 修复跨驱动器路径问题
+                        try:
+                            # 尝试生成相对路径
+                            rel_output_dir = os.path.relpath(output_dir, os.path.dirname(lightmap_base_dir))
+                            new_lightmap_path = os.path.join(rel_output_dir, f"packed_lightmap_{texture.texture_index}.png")
+                        except ValueError as e:
+                            # 如果发生错误(如跨驱动器)，则使用直接的文件名
+                            print(f"注意: 跨驱动器路径问题，使用文件名作为路径: {e}")
+                            new_lightmap_path = f"packed_lightmap_{texture.texture_index}.png"
+                        
+                        # 确保路径分隔符一致
+                        new_lightmap_path = new_lightmap_path.replace("\\", "/")
+                        
+                        # 更新lightmap信息
+                        updated_lightmap_info[mesh_id] = {
+                            "mesh_id": mesh_id,
+                            "texture_index": texture.texture_index,
+                            "new_lq": new_lightmap_path,
+                            "new_bias_scale": new_bias_scale,
+                            "scale_factor": 1.0  # 默认缩放因子
+                        }
+                        
                     else:
-                        print(f"警告: 物体 {mesh_id} 的灯光贴图区域 ({w}x{h}) 在位置 ({target_x},{target_y}) 超出纹理边界 {texture_size}x{texture_size}")
+                        print(f"警告: 物体 {mesh_id} 的灯光贴图区域 ({w}x{h}) "
+                              f"在位置 ({target_x},{target_y}) 超出纹理边界 "
+                              f"{texture_info['width']}x{texture_info['height']}")
                 except Exception as e:
                     print(f"警告: 处理物体 {mesh_id} 时出错: {e}")
+                    print(traceback.format_exc())
             
             except Exception as e:
                 print(f"警告: 处理 {mesh_id} 的灯光贴图时出错: {e}")
+                print(traceback.format_exc())
     
     # 保存打包后的纹理
     saved_paths = []
-    for i, texture in enumerate(packed_textures):
-        output_path = os.path.join(output_dir, f"packed_lightmap_{i}.png")
-        Image.fromarray(texture).save(output_path)
+    for texture_info in packed_textures:
+        texture_idx = texture_info["texture_index"]
+        output_path = os.path.join(output_dir, f"packed_lightmap_{texture_idx}.png")
+        Image.fromarray(texture_info["array"]).save(output_path)
         saved_paths.append(output_path)
         print(f"已保存打包纹理: {output_path}")
     
-    return saved_paths
+    return updated_lightmap_info
 
 def main():
     parser = argparse.ArgumentParser(description="混合架构灯光贴图打包工具")
@@ -488,10 +585,10 @@ def main():
                         help="输出目录路径，默认为./output/lightmaps")
     # parser.add_argument("--algorithm", type=str, choices=["simulated_annealing", "traditional"],
     #                     default="simulated_annealing", help="打包算法")
-    parser.add_argument("--texture-size", type=int, default=4096,
-                        help="输出纹理大小，默认为4096")
-    parser.add_argument("--min-texture-size", type=int, default=32,
-                        help="最小纹理大小，默认为32")
+    parser.add_argument("--texture-size", type=int, default=2048,
+                        help="输出纹理大小，默认为2048")
+    parser.add_argument("--min-texture-size", type=int, default=16,
+                        help="最小纹理大小，默认为16")
     parser.add_argument("--dll", type=str, default=None,
                         help="LightmapPacker.dll路径，如果不指定则自动搜索")
     
@@ -500,15 +597,22 @@ def main():
     
     args = parser.parse_args()
     
+    # args.scene = "basic_level"
     # 根据场景名称获取JSON路径（如果未指定）
-    if args.json is None:
-        try:
-            args.json = get_lightmap_path(args.scene)
-            print(f"根据场景名称'{args.scene}'获取JSON路径: {args.json}")
-        except Exception as e:
-            print(f"无法根据场景名称获取JSON路径: {e}")
-            print("请指定--json参数")
-            return
+    # if args.json is None:
+    #     try:
+    #         args.json = get_lightmap_path(args.scene)
+    #         print(f"根据场景名称'{args.scene}'获取JSON路径: {args.json}")
+    #     except Exception as e:
+    #         print(f"无法根据场景名称获取JSON路径: {e}")
+    #         print("请指定--json参数")
+    #         return
+    if args.scene is not None:
+        args.texture_size = GlobalParameter.ALL_LIGHT_MAP_DATA[args.scene].get(
+            "lightmap_texture_size", args.texture_size)
+        args.min_texture_size = GlobalParameter.ALL_LIGHT_MAP_DATA[args.scene].get(
+            "lightmap_texture_min_size", args.min_texture_size)
+        args.json = get_lightmap_path(args.scene)
     
     # 设置输出路径
     if args.output is None:
@@ -517,8 +621,9 @@ def main():
     # 确保输出目录存在
     os.makedirs(args.output, exist_ok=True)
     
-    # 获取新的JSON路径
-    new_json_path = os.path.join(args.output, get_new_json_path())
+    # 获取新的JSON路径 - 修改为与源JSON在相同位置
+    source_json_dir = os.path.dirname(args.json)
+    new_json_path = os.path.join(source_json_dir, get_new_json_path())
     
     try:
         total_start_time = time.time()
@@ -588,32 +693,22 @@ def main():
                     # 确保最小尺寸
                     pixel_width = max(pixel_width, args.min_texture_size)
                     pixel_height = max(pixel_height, args.min_texture_size)
-                    
-                    # 添加到组的矩形列表，增加rectangle_id字段
-                    group_rectangles[group_key].append({
+                    info = {
                         "mesh_id": mesh_id,
                         "name": item.get("name", mesh_id),
                         "lightmap_lq": lightmap_lq,
-                        "original_bias_scale": bias_scale,
+                        "original_bias_scale": bias_scale,  # 使用一致的字段名
                         "width": pixel_width,
                         "height": pixel_height,
-                        "rectangle_id": int(hash(mesh_id)),  # 为每个矩形添加ID
-                    })
+                        "rectangle_id": 0, # generate_sequential_id(mesh_id, group_key),
+                    }
+                    info["rectangle_id"] = generate_sequential_id(mesh_id, info)
+                    # 添加到组的矩形列表，增加rectangle_id字段
+                    group_rectangles[group_key].append(info)
                     
                 except Exception as e:
                     print(f"警告: 处理 {mesh_id} 的灯光贴图时出错: {e}")
                     raise e
-                    # # 使用默认值
-                    # group_rectangles[group_key].append({
-                    #     "mesh_id": mesh_id,
-                    #     "name": item.get("name", mesh_id),
-                    #     "lightmap_lq": lightmap_lq,
-                    #     # "lightmap_hq": item.get("lightmap_hq", ""),
-                    #     "original_bias_scale": bias_scale,
-                    #     "width": args.min_texture_size,
-                    #     "height": args.min_texture_size,
-                    #     "rectangle_id": hash(mesh_id),
-                    # })
         
         print(f"已计算 {sum(len(rects) for rects in group_rectangles.values())} 个物体的lightmap大小")
 
@@ -641,7 +736,7 @@ def main():
                 continue
             # 创建一个列表来存储矩形ID
             rectangle_ids = [rectangle["rectangle_id"] for rectangle in rectangles]
-            print(f"添加组 '{group_key}' 到C++，矩形ID: {rectangle_ids}")
+            
             cpp_input_group_data = InputGroupData(rectangles[0]["width"], rectangles[0]["height"], rectangle_ids)
             if not packer.add_group(cpp_input_group_data):
                 print(f"警告: 添加组 '{group_key}' 到C++失败")
@@ -650,16 +745,7 @@ def main():
             print("贴图打包失败")
             return
         
-        print("test over")
-        return
-        # 获取结果
-        texture_count = packer.get_texture_count()
-        packing_efficiency = packer.get_packing_efficiency()
-        print(f"贴图打包成功！生成了 {texture_count} 个纹理")
-        print(f"打包效率: {packing_efficiency * 100:.2f}%")
-        
-        # 获取所有打包结果
-        results = packer.get_all_results()
+        results = packer.get_all_texture_results()
         print(f"获取到 {len(results)} 个打包结果")
         
         step3_time = time.time() - step3_start_time
@@ -668,34 +754,31 @@ def main():
         # 保存打包结果到JSON
         debug_output_path = os.path.join(args.output, "packing_debug.json")
         save_packing_results_to_json(results, groups, debug_output_path)
-        
+         
         # 步骤4: 处理并保存打包纹理
         step4_start_time = time.time()
-        packed_textures = process_and_save_packed_textures(
+        
+        # 创建BigMap目录在源灯光贴图文件夹内
+        bigmap_dir = os.path.join(os.path.dirname(lightmap_base_dir), "BigMap")
+        os.makedirs(bigmap_dir, exist_ok=True)
+        print(f"创建大图保存目录: {bigmap_dir}")
+        
+        updated_lightmap_info = process_and_save_packed_textures(
             results, 
             group_rectangles,
             texture_size=args.texture_size, 
-            output_dir=args.output,
+            output_dir=bigmap_dir,  # 使用BigMap目录
             lightmap_base_dir=lightmap_base_dir
         )
+        
         step4_time = time.time() - step4_start_time
         print(f"步骤4: 处理并保存打包纹理完成，耗时: {step4_time:.2f}秒")
         
         # 步骤5: 更新JSON数据
         step5_start_time = time.time()
         
-        # 将结果转换为更新JSON所需的格式
-        new_lightmap_info = {}
-        for result in results:
-            new_lightmap_info[result["mesh_id"]] = {
-                "texture_index": result["texture_index"],
-                "new_lq": result["new_lq"],
-                "new_bias_scale": result["new_bias_scale"],
-                "scale_factor": result.get("scale_factor", 1.0)
-            }
-        
         # 更新JSON数据
-        updated_json_data = update_json_data(json_data, new_lightmap_info)
+        updated_json_data = update_json_data(json_data, updated_lightmap_info)
         
         # 保存更新后的JSON
         with open(new_json_path, 'w', encoding='utf-8') as f:
@@ -708,7 +791,7 @@ def main():
         total_time = time.time() - total_start_time
         print("\n=== 处理完成 ===")
         print(f"总共处理了 {len(results)} 个对象")
-        print(f"生成了 {texture_count} 个打包贴图")
+        # print(f"生成了 {texture_count} 个打包贴图")
         print(f"总耗时: {total_time:.2f}秒")
         
         # 显示每个步骤占用的时间百分比
@@ -720,11 +803,11 @@ def main():
         print(f"- 更新JSON数据: {step5_time/total_time*100:.1f}%")
         
         print(f"\n新的JSON文件已保存为: {new_json_path}")
-        print(f"新的光照图文件保存在: {args.output}")
+        print(f"新的光照图文件保存在: {bigmap_dir}")
         
     except Exception as e:
         print(f"处理过程中出错: {e}")
-        traceback.print_exc()
+        print(traceback.format_exc())
 
 if __name__ == "__main__":
     main() 

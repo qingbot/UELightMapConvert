@@ -11,7 +11,7 @@ import json
 import time
 import platform
 from typing import List, Tuple, Dict, Optional, Any
-from lightmap_structures import InputGroupData, OutputGroupData,SingleOutputRectangle
+from lightmap_structures import InputGroupData, OutputGroupData, SingleOutPutRectangle, OutLightMapTexture
 
 # 定义回调函数类型
 LOGFUNC = ctypes.CFUNCTYPE(None, ctypes.c_char_p)
@@ -103,7 +103,7 @@ class LightmapPackerPython:
         self.dll.SetTextureSize.restype = ctypes.c_bool
         
         # 添加组
-        self.dll.AddGroup.argtypes = [ctypes.c_void_p, InputGroupData]
+        self.dll.AddGroup.argtypes = [ctypes.c_void_p, ctypes.POINTER(InputGroupData)]
         self.dll.AddGroup.restype = ctypes.c_bool
         
         # 打包函数
@@ -117,45 +117,32 @@ class LightmapPackerPython:
         self.dll.GetPackingEfficiency.argtypes = [ctypes.c_void_p]
         self.dll.GetPackingEfficiency.restype = ctypes.c_float
         
-        self.dll.GetResultCount.argtypes = [ctypes.c_void_p]
-        self.dll.GetResultCount.restype = ctypes.c_int
+        # 获取特定纹理包含的矩形数量
+        self.dll.GetTextureRectangleCount.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        self.dll.GetTextureRectangleCount.restype = ctypes.c_int
+        
+        # 获取纹理结果
+        self.dll.GetTextureResult.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(OutLightMapTexture)]
+        self.dll.GetTextureResult.restype = ctypes.c_bool
 
         self.dll.TestLog.argtypes = [ctypes.c_void_p]
         self.dll.TestLog.restype = None
 
         self.dll.SetLogCallBack.argtypes = [ctypes.c_void_p, LOGFUNC]
         self.dll.SetLogCallBack.restype = None
-        
-        self.dll.GetResult.argtypes = [
-            ctypes.c_void_p,            # instance
-            ctypes.c_int,               # index
-            ctypes.c_char_p,            # mesh_id
-            ctypes.c_char_p,            # name
-            ctypes.c_char_p,            # new_lq
-            ctypes.POINTER(ctypes.c_int),  # texture_index
-            ctypes.POINTER(ctypes.c_int),  # position_x
-            ctypes.POINTER(ctypes.c_int),  # position_y
-            ctypes.POINTER(ctypes.c_int),  # size_w
-            ctypes.POINTER(ctypes.c_int),  # size_h
-            ctypes.POINTER(ctypes.c_float),  # bias_scale (4个浮点数)
-            ctypes.POINTER(ctypes.c_float)   # scale_factor
-        ]
-        self.dll.GetResult.restype = ctypes.c_bool
     
     def set_texture_size(self, texture_size: int) -> bool:
         """设置输出纹理大小"""
         return self.dll.SetTextureSize(self.instance, texture_size)
     
     def add_group(self, input_group_data: InputGroupData) -> bool:
+        """添加一个组"""
         # 调用C++ DLL添加组
-        return self.dll.AddGroup(self.instance, input_group_data)
+        return self.dll.AddGroup(self.instance, ctypes.byref(input_group_data))
     
-    def pack_lightmaps(self, use_simulated_annealing: bool = True) -> bool:
+    def pack_lightmaps(self) -> bool:
         """
         执行灯光贴图打包
-        
-        Args:
-            use_simulated_annealing: 是否使用模拟退火算法,默认为True
             
         Returns:
             是否成功执行打包
@@ -170,123 +157,138 @@ class LightmapPackerPython:
         """获取打包效率 (0.0-1.0)"""
         return self.dll.GetPackingEfficiency(self.instance)
     
-    def get_result_count(self) -> int:
-        """获取结果数量"""
-        return self.dll.GetResultCount(self.instance)
-    
-    def get_result(self, index: int) -> Optional[Dict[str, Any]]:
+    def get_texture_rectangle_count(self, texture_id: int) -> int:
         """
-        获取指定索引的打包结果
+        获取特定纹理ID包含的矩形数量
         
         Args:
-            index: 结果索引
+            texture_id: 纹理ID
             
         Returns:
-            打包结果字典,包含以下字段:
-            - mesh_id: 物体ID
-            - name: 物体名称
-            - new_lq: 新的灯光贴图路径
-            - texture_index: 纹理索引
-            - position: (x, y) 在纹理中的位置
-            - size: (width, height) 在纹理中的大小
-            - new_bias_scale: 新的bias_scale (4个浮点数)
-            - scale_factor: 缩放因子
+            矩形数量，如果返回-1则表示没有这个纹理ID
         """
-        # 创建缓冲区
-        mesh_id_buf = ctypes.create_string_buffer(256)
-        name_buf = ctypes.create_string_buffer(256)
-        new_lq_buf = ctypes.create_string_buffer(512)
+        return self.dll.GetTextureRectangleCount(self.instance, texture_id)
+    
+    def get_texture_result(self, texture_id: int) -> Optional[OutLightMapTexture]:
+        """
+        获取特定纹理ID的结果
         
-        texture_index = ctypes.c_int(0)
-        position_x = ctypes.c_int(0)
-        position_y = ctypes.c_int(0)
-        size_w = ctypes.c_int(0)
-        size_h = ctypes.c_int(0)
+        Args:
+            texture_id: 纹理ID
+            
+        Returns:
+            OutLightMapTexture对象，如果失败则返回None
+        """
+        # 先获取矩形数量
+        rectangle_count = self.get_texture_rectangle_count(texture_id)
+        if rectangle_count <= 0:
+            return None
+            
+        # 创建OutLightMapTexture对象
+        result = OutLightMapTexture()
         
-        # 创建bias_scale数组 (4个浮点数)
-        bias_scale = (ctypes.c_float * 4)()
-        scale_factor = ctypes.c_float(1.0)
-        
+        # 为矩形数组分配内存
+        if rectangle_count > 0:
+            # 创建矩形数组
+            rectangles_array = (SingleOutPutRectangle * rectangle_count)()
+            # 设置矩形数组指针
+            result.rectangles = ctypes.cast(rectangles_array, ctypes.POINTER(SingleOutPutRectangle))
+            # 设置矩形数量
+            result.rectangle_count = rectangle_count
+            
         # 调用C++ DLL获取结果
-        success = self.dll.GetResult(
-            self.instance,
-            index,
-            mesh_id_buf,
-            name_buf,
-            new_lq_buf,
-            ctypes.byref(texture_index),
-            ctypes.byref(position_x),
-            ctypes.byref(position_y),
-            ctypes.byref(size_w),
-            ctypes.byref(size_h),
-            bias_scale,
-            ctypes.byref(scale_factor)
-        )
+        success = self.dll.GetTextureResult(self.instance, texture_id, ctypes.byref(result))
         
         if not success:
             return None
             
-        # 解码字符串
-        mesh_id = mesh_id_buf.value.decode('utf-8')
-        name = name_buf.value.decode('utf-8')
-        new_lq = new_lq_buf.value.decode('utf-8')
+        return result
         
-        # 将bias_scale转换为Python列表
-        bias_scale_list = [bias_scale[i] for i in range(4)]
-        
-        # 返回结果字典
-        return {
-            "mesh_id": mesh_id,
-            "name": name,
-            "new_lq": new_lq,
-            "texture_index": texture_index.value,
-            "position": (position_x.value, position_y.value),
-            "size": (size_w.value, size_h.value),
-            "new_bias_scale": bias_scale_list,
-            "scale_factor": scale_factor.value
-        }
-    
-    def get_all_results(self) -> List[Dict[str, Any]]:
+    def get_all_texture_results(self) -> List[OutLightMapTexture]:
         """
-        获取所有打包结果
+        获取所有纹理结果
         
         Returns:
-            所有打包结果的列表
+            OutLightMapTexture对象列表
         """
         results = []
-        count = self.get_result_count()
+        texture_count = self.get_texture_count()
         
-        for i in range(count):
-            result = self.get_result(i)
-            if result:
-                results.append(result)
+        for i in range(texture_count):
+            # 获取特定纹理ID的结果
+            texture_result = self.get_texture_result(i)
+            if texture_result:
+                results.append(texture_result)
+            else:
+                # 如果获取失败，则退出循环
+                break
                 
         return results
     
     def test_log(self):
+        """测试日志功能"""
         self.dll.TestLog(self.instance)
 
     def set_log_callback(self, callback_func):
+        """设置日志回调函数"""
         # 保存回调函数的引用，防止被垃圾回收
         self._log_callback = callback_func
         self.dll.SetLogCallBack(self.instance, self._log_callback)
 
 def main():
+    """主函数"""
     log_callback = default_log_callback
 
+    # 创建LightmapPacker实例
     lightmap_packer = LightmapPackerPython()
     lightmap_packer.set_log_callback(log_callback)
     lightmap_packer.test_log()
 
+    # 添加一些测试数据
     input_group_data = InputGroupData(100, 100, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
     lightmap_packer.add_group(input_group_data)
-
 
     input_group_data1 = InputGroupData(200, 200, [1, 2, 3, 9, 10])
     lightmap_packer.add_group(input_group_data1)
 
-    lightmap_packer.pack_lightmaps()
+    # 执行打包
+    success = lightmap_packer.pack_lightmaps()
+    if not success:
+        print("打包失败")
+        return 1
 
+    # 获取纹理数量
+    texture_count = lightmap_packer.get_texture_count()
+    print(f"纹理数量: {texture_count}")
+    
+    # 遍历每个纹理
+    for texture_id in range(texture_count):
+        # 获取纹理包含的矩形数量
+        rectangle_count = lightmap_packer.get_texture_rectangle_count(texture_id)
+        print(f"纹理 {texture_id} 包含的矩形数量: {rectangle_count}")
+        
+        if rectangle_count <= 0:
+            continue
+            
+        # 获取纹理结果
+        texture_result = lightmap_packer.get_texture_result(texture_id)
+        if not texture_result:
+            print(f"获取纹理 {texture_id} 结果失败")
+            continue
+            
+        print(f"纹理 {texture_id}:")
+        print(f"  纹理索引: {texture_result.texture_index}")
+        print(f"  纹理大小: {texture_result.texture_width}x{texture_result.texture_height}")
+        print(f"  矩形数量: {texture_result.rectangle_count}")
+        
+        # 打印矩形信息
+        for i, rect in enumerate(texture_result.get_rectangles()):
+            print(f"  矩形 {i}:")
+            print(f"    位置: ({rect.position_x}, {rect.position_y})")
+            print(f"    大小: {rect.width}x{rect.height}")
+            print(f"    ID: {rect.rectangle_id}")
+
+    return 0
 
 if __name__ == "__main__":
     sys.exit(main()) 

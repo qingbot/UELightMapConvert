@@ -15,6 +15,8 @@ ALL_LIGHT_MAP_DATA = {
         "terrain_size_offset" : [512,512,512,512],
         # 合并为一张大纹理时，该纹理的大小
         "lightmap_texture_size" : 2048,
+        # 合并为一张大纹理时，该纹理的最小大小
+        "lightmap_texture_min_size" : 16,
 
         ################################ 这俩暂时不用 #################################
         # CHAOS中Lightmap所在的绝对路径

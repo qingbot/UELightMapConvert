@@ -33,13 +33,16 @@ class InputGroupData(ctypes.Structure):
         self.rectangle_id = ctypes.cast(arr, ctypes.POINTER(ctypes.c_int))
 
 
-class SingleOutputRectangle(ctypes.Structure):
+class SingleOutPutRectangle(ctypes.Structure):
     _pack_ = 4
     _fields_ = [
         ("position_x", ctypes.c_int),
         ("position_y", ctypes.c_int),
+        ("width", ctypes.c_int),
+        ("height", ctypes.c_int),
         ("rectangle_id", ctypes.c_int)
     ]
+
 
 class OutputGroupData(ctypes.Structure):
     _pack_ = 4
@@ -49,7 +52,7 @@ class OutputGroupData(ctypes.Structure):
         ("single_rectangle_width", ctypes.c_int),
         ("single_rectangle_height", ctypes.c_int),
         ("group_instance_count", ctypes.c_int),
-        ("rectangles", ctypes.POINTER(SingleOutputRectangle))
+        ("rectangles", ctypes.POINTER(SingleOutPutRectangle))
     ]
 
     def __init__(self):
@@ -58,27 +61,73 @@ class OutputGroupData(ctypes.Structure):
         self.rectangles = None
         self.group_instance_count = 0
 
-    def set_rectangles(self, rectangles: List[SingleOutputRectangle]):
+    def set_rectangles(self, rectangles: List[SingleOutPutRectangle]):
         """
         设置矩形数组
         
         Args:
-            rectangles: SingleOutputRectangle对象列表
+            rectangles: SingleOutPutRectangle对象列表
         """
         self.group_instance_count = len(rectangles)
-        arr = (SingleOutputRectangle * len(rectangles))(*rectangles)
-        self.rectangles = ctypes.cast(arr, ctypes.POINTER(SingleOutputRectangle))
+        arr = (SingleOutPutRectangle * len(rectangles))(*rectangles)
+        self.rectangles = ctypes.cast(arr, ctypes.POINTER(SingleOutPutRectangle))
 
-    def get_rectangles(self) -> List[SingleOutputRectangle]:
+    def get_rectangles(self) -> List[SingleOutPutRectangle]:
         """
         获取矩形列表
         
         Returns:
-            SingleOutputRectangle对象列表
+            SingleOutPutRectangle对象列表
         """
         if not self.rectangles or self.group_instance_count == 0:
             return []
         return [self.rectangles[i] for i in range(self.group_instance_count)]
+
+
+class OutLightMapTexture(ctypes.Structure):
+    _pack_ = 4
+    _fields_ = [
+        ("texture_index", ctypes.c_int),
+        ("texture_width", ctypes.c_int),
+        ("texture_height", ctypes.c_int),
+        ("rectangle_count", ctypes.c_int),
+        ("rectangles", ctypes.POINTER(SingleOutPutRectangle))
+    ]
+
+    def __init__(self):
+        """初始化OutLightMapTexture结构"""
+        super().__init__()
+        self.rectangles = None
+        self.rectangle_count = 0
+        self.texture_index = 0
+        self.texture_width = 0
+        self.texture_height = 0
+
+    def set_rectangles(self, rectangles: List[SingleOutPutRectangle]):
+        """
+        设置矩形数组
+        
+        Args:
+            rectangles: SingleOutPutRectangle对象列表
+        """
+        self.rectangle_count = len(rectangles)
+        arr = (SingleOutPutRectangle * len(rectangles))(*rectangles)
+        self.rectangles = ctypes.cast(arr, ctypes.POINTER(SingleOutPutRectangle))
+
+    def get_rectangles(self) -> List[SingleOutPutRectangle]:
+        """
+        获取矩形列表
+        
+        Returns:
+            SingleOutPutRectangle对象列表
+        """
+        if not self.rectangles or self.rectangle_count == 0:
+            return []
+        return [self.rectangles[i] for i in range(self.rectangle_count)]
+
+
+# 为了兼容性保留旧的类名，但实际使用新的结构体
+SingleOutputRectangle = SingleOutPutRectangle
 
 # 使用示例
 def example_usage():
@@ -95,9 +144,11 @@ def example_usage():
     # 创建矩形数据
     rectangles = []
     for i in range(4):
-        rect = SingleOutputRectangle()
+        rect = SingleOutPutRectangle()
         rect.position_x = i * 100
         rect.position_y = 0
+        rect.width = 100
+        rect.height = 100
         rect.rectangle_id = i + 1
         rectangles.append(rect)
     
@@ -106,7 +157,7 @@ def example_usage():
     
     # 获取并打印矩形数据
     for rect in output_data.get_rectangles():
-        print(f"Rectangle {rect.rectangle_id}: pos=({rect.position_x}, {rect.position_y})")
+        print(f"Rectangle {rect.rectangle_id}: pos=({rect.position_x}, {rect.position_y}), size=({rect.width}, {rect.height})")
 
 if __name__ == "__main__":
     example_usage() 

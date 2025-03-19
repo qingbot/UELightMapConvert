@@ -7,7 +7,7 @@ EXPORTS
     PackLightmaps @5
     GetTextureCount @6
     GetPackingEfficiency @7
-    GetResultCount @8
-    GetResult @9
+    GetTextureRectangleCount @8
+    GetTextureResult @9
     TestLog @10
     SetLogCallBack @11

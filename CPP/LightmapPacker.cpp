@@ -13,8 +13,10 @@
 #include <filesystem>
 #include <cstring>
 #include <functional>
+#include <assert.h>
 
 namespace fs = std::filesystem;
+using std::vector;
 
 template <typename... Args>
 char *char_merge(const char *left, Args &&...args)
@@ -25,6 +27,19 @@ char *char_merge(const char *left, Args &&...args)
     return result;
 }
 
+std::function<void(const char *)> global_log_callback;
+
+template <typename... Args>
+void GlobalLog(const char *format, Args &&...args)
+{
+    if (global_log_callback)
+    {
+        char *message = char_merge(format, std::forward<Args>(args)...);
+        global_log_callback(message);
+        delete[] message;
+    }
+}
+
 struct LightMapInstanceGroup
 {
     float scale = 1.0f;
@@ -32,14 +47,15 @@ struct LightMapInstanceGroup
     int source_rectangle_width = 0;
     int source_rectangle_height = 0;
 
-    int texture_index = -1;
+    // int texture_index = -1;
     // = source_rectangle_width * scale
-    int rectangle_widht = 0;
+    int rectangle_width = 0;
     // = source_rectangle_height * scale
     int rectangle_height = 0;
 
     int group_instance_count = 0;
-    std::vector<int> rectangles;
+    // 矩形的id
+    std::vector<int> rectangles_id;
 
     LightMapInstanceGroup() = default;
     LightMapInstanceGroup(const LightMapInstanceGroup &) = default;
@@ -53,11 +69,179 @@ struct LightMapInstanceGroup
         group_instance_count = other.rectangle_count;
         for (int i = 0; i < group_instance_count; i++)
         {
-            rectangles.push_back(other.rectangle_id[i]);
+            rectangles_id.push_back(other.rectangle_id[i]);
         }
+        scale = 1.0f;
         source_rectangle_width = other.rectangle_width;
         source_rectangle_height = other.rectangle_height;
+        rectangle_width = source_rectangle_width * scale;
+        rectangle_height = source_rectangle_height * scale;
         return *this;
+    }
+};
+
+// 被LightmapTexture持有, 表示一个lightmap的矩形
+struct SingleResultLightMapRectangle
+{
+    int position_x = 0;
+    int position_y = 0;
+    int width = 0;
+    int height = 0;
+    int rectangle_id = 0;
+    LightMapInstanceGroup *group = nullptr;
+
+    SingleResultLightMapRectangle() = default;
+    SingleResultLightMapRectangle(int position_x, int position_y, int width, int height, int rectangle_id, LightMapInstanceGroup *group)
+    {
+        this->position_x = position_x;
+        this->position_y = position_y;
+        this->width = width;
+        this->height = height;
+        this->rectangle_id = rectangle_id;
+        this->group = group;
+    }
+};
+
+// 专门用以计算打包的矩形，表示空白区域
+// 被对角线持有
+struct RectangleForPacking
+{
+    int position_x = 0;
+    int position_y = 0;
+    int width = 0;
+    int height = 0;
+
+    // 尝试获取一个最合适的空白区域, 优先找面积最小的，其次是位置最靠近左下角的
+    // 返回index， -1表示没有找到
+    static int try_get_most_suitable_place(int width, int height, vector<RectangleForPacking> &remaining_places)
+    {
+        int min_area = INT_MAX;
+        int position_x = -1;
+        int position_y = -1;
+        int index = -1;
+        // 最靠近左下角的，面积最小的
+        for (int i = 0; i < remaining_places.size(); i++)
+        {
+            RectangleForPacking &place = remaining_places[i];
+            if (place.width >= width && place.height >= height)
+            {
+                int area = place.width * place.height;
+                if (area < min_area)
+                {
+                    min_area = area;
+                    position_x = place.position_x;
+                    position_y = place.position_y;
+                    index = i;
+                }
+                else if (area == min_area)
+                {
+                    if (place.position_x < position_x)
+                    {
+                        position_x = place.position_x;
+                        position_y = place.position_y;
+                        index = i;
+                    }
+                    else if (place.position_x == position_x && place.position_y < position_y)
+                    {
+                        position_y = place.position_y;
+                        index = i;
+                    }
+                }
+            }
+        }
+        return index;
+    }
+
+    // 尝试获取一个空白区域
+    // 需要的宽度，高度
+    // 剩余的空白区域
+    // 如果返回true,则表示分割出来了一个空白区域
+    // 如果返回false,则表示没有分割出来空白区域
+    static bool try_get_place(int width, int height, vector<RectangleForPacking> &remaining_places, RectangleForPacking &result)
+    {
+        int index = try_get_most_suitable_place(width, height, remaining_places);
+        if (index == -1)
+        {
+            return false;
+        }
+        RectangleForPacking place = remaining_places[index];
+        assert(place.width >= width && place.height >= height);
+        remaining_places.erase(remaining_places.begin() + index);
+
+        // 将目标区域分割出来，添加到result中，剩余区域裁切为多个矩形，添加到remaining_places中
+        if (place.width == width && place.height == height)
+        {
+            result = place;
+            return true;
+        }
+
+        // 以下是这种情况
+        // 0 0
+        // 0 0
+        // x 0
+        // ==========
+        // 1 1
+        // 1 1
+        // x 0
+        // +++++++++++++++++
+        // 0 0 0
+        // x 0 0
+        // ==========
+        // 1 0 0
+        // x 0 0
+        // 有以上两种情况
+        // 将x裁切出来,将剩余区域裁切为两个矩形
+        // 裁切为 0 和 1 两个矩形
+        // 如果剩余区域的宽度大于高度，就横着切，否则竖着切
+        // 裁切出目标区域
+        result.position_x = place.position_x;
+        result.position_y = place.position_y;
+        result.width = width;
+        result.height = height;
+
+        auto check_size_func = [](const RectangleForPacking &a)
+        {
+            return a.width > 0 && a.height > 0;
+        };
+        RectangleForPacking remaining_place0;
+        RectangleForPacking remaining_place1;
+        if (place.width - width > place.height - height)
+        {
+            // 横着切
+            remaining_place0.position_x = place.position_x + width;
+            remaining_place0.position_y = place.position_y;
+            remaining_place0.width = place.width - width;
+            remaining_place0.height = place.height;
+
+            remaining_place1.position_x = place.position_x;
+            remaining_place1.position_y = place.position_y + height;
+            remaining_place1.width = width;
+            remaining_place1.height = place.height - height;
+        }
+        else
+        {
+            // 竖着切
+            remaining_place0.position_x = place.position_x + width;
+            remaining_place0.position_y = place.position_y;
+            remaining_place0.width = place.width - width;
+            remaining_place0.height = height;
+
+            remaining_place1.position_x = place.position_x;
+            remaining_place1.position_y = place.position_y + height;
+            remaining_place1.width = place.width;
+            remaining_place1.height = place.height - height;
+        }
+        if (check_size_func(remaining_place0))
+        {
+            remaining_places.push_back(remaining_place0);
+        }
+
+        if (check_size_func(remaining_place1))
+        {
+            remaining_places.push_back(remaining_place1);
+        }
+
+        return true;
     }
 };
 
@@ -67,71 +251,188 @@ struct LightMapInstanceGroup
 // 一旦放下，就不会再拿出来了
 struct LightMapTexture
 {
+    // 对角线信息
+    struct Diagonal
+    {
+        // 处于对角线上，起始矩形的宽度
+        int width;
+        int height;
+
+        // 处于对角线上的矩形，在纹理中的位置
+        int position_x = 0;
+        int position_y = 0;
+
+        // 归属于当前对角线的矩形
+        vector<SingleResultLightMapRectangle> rectangles;
+
+        // 空白区域
+        vector<RectangleForPacking> rectangles_row;
+        vector<RectangleForPacking> rectangles_column;
+    };
+
     int texture_index = -1;
     // texture 一定是正方形的
     int texture_size = 0;
 
-    std::vector<LightMapInstanceGroup *> groups;
+    // 这里面存着当前texture里面所有的矩形
+    vector<Diagonal> diagonals;
 
     bool TryAddGroup(LightMapInstanceGroup &group)
     {
-        return false;
+        return LightMapTexture::TryAdd(&group, this);
     }
 
-    // 一组矩形是否可以放入到纹理中, 如果group为nullptr，那么就只判断是否可以放入到大小为texture_size的纹理中
-    static bool TryFitSize(int texture_size, int rectangle_width, int rectangle_height, int rectangle_count,
-                           std::vector<LightMapInstanceGroup *> *groups)
+private:
+    // 获取一个对角线，并设置中心
+    // 结果，对角线中心，持有此对角线的贴图，矩形id，对角线的位置
+    static bool GetADiagonalAndSetCenter(Diagonal &diagonal, LightMapInstanceGroup *center, LightMapTexture *lightMapTexture, int rectangle_index,
+                                         int position_x, int position_y)
     {
-
-        // 0: 矩形宽度
-        // 1: 矩形高度
-        int* rectangles = nullptr;
-        int pending_index = 0;
-        if(groups == nullptr)
+        if (position_x + center->rectangle_width > lightMapTexture->texture_size ||
+            position_y + center->rectangle_height > lightMapTexture->texture_size)
         {
-            rectangles = new int[rectangle_count * 2];
-        }
-        else
-        {
-            pending_index = groups->size();
-            rectangles = new int[(rectangle_count + groups->size()) * 2];
-            for(int i = 0; i < groups->size(); ++i)
-            {
-                rectangles[i * 2] = (*groups)[i]->source_rectangle_width;
-                rectangles[i * 2 + 1] = (*groups)[i]->source_rectangle_height;
-            }
+            return false;
         }
 
-        // 当前对角线的起始坐标
-        int current_start_x = 0;
-        int current_start_y = 0;
-        // 当前对角线物体的宽度
-        int current_line_width = 0;
-        // 当前对角线物体的高度
-        int current_line_height = 0;
+        diagonal.width = center->rectangle_width;
+        diagonal.height = center->rectangle_height;
+        diagonal.position_x = position_x;
+        diagonal.position_y = position_y;
+        diagonal.rectangles.push_back(SingleResultLightMapRectangle(
+            position_x,
+            position_y,
+            center->rectangle_width,
+            center->rectangle_height,
+            center->rectangles_id[rectangle_index],
+            center));
 
-        int current_width_x = 0;
-        int current_width_y = 0;
-        // 算法的大改示例如下
-        // x 0 0 0
-        // x 0 0 0
-        // x 0 0 0
-        // x x x 0
-        // ========
-        // x x 0 0
-        // x x 0 0
-        // x x x x
-        // x x x x
+        LightMapInstanceGroup *single_texture = center;
+
+        auto check_size_func = [](const RectangleForPacking &a)
+        {
+            return a.width > 0 && a.height > 0;
+        };
+
+        // 先横 再列
+        RectangleForPacking rectangle_for_packing_row;
+        rectangle_for_packing_row.position_x = position_x + single_texture->rectangle_width;
+        rectangle_for_packing_row.position_y = position_y;
+        rectangle_for_packing_row.width = lightMapTexture->texture_size - rectangle_for_packing_row.position_x;
+        rectangle_for_packing_row.height = single_texture->rectangle_height;
+
+        RectangleForPacking rectangle_for_packing_column;
+        rectangle_for_packing_column.position_x = position_x;
+        rectangle_for_packing_column.position_y = position_y + single_texture->rectangle_height;
+        rectangle_for_packing_column.width = single_texture->rectangle_width;
+        rectangle_for_packing_column.height = lightMapTexture->texture_size - rectangle_for_packing_column.position_y;
+
+        if (check_size_func(rectangle_for_packing_row))
+        {
+            diagonal.rectangles_row.push_back(rectangle_for_packing_row);
+        }
+        if (check_size_func(rectangle_for_packing_column))
+        {
+            diagonal.rectangles_column.push_back(rectangle_for_packing_column);
+        }
+
+        return true;
+    }
+
+public:
+    // 尝试将当前的Group塞入到lightMapTexture中，如果塞不下，则什么都没发生，如果塞下了，则直接塞入Texture中
+    static bool TryAdd(LightMapInstanceGroup *group, LightMapTexture *lightMapTexture)
+    {
+        // 对角线上所有的矩形
+        if (group == nullptr || lightMapTexture == nullptr)
+        {
+            return false;
+        }
+        if (group->group_instance_count == 0)
+        {
+            return true;
+        }
+        vector<Diagonal> diagonals = lightMapTexture->diagonals;
+        // 算法的示例如下
+        // x  0  0  0
+        // x  0  0  0
+        // x  0  0  0
+        // x  x  x  0
+        // =============
+        // x  x  0  0
+        // x  x  0  0
+        // x  x  x  x
+        // x  x  x  x
         // 按照横，列的顺序一个个填充
         // 处于对角线上的那个矩形，定义了这行和这列的宽度
         // 这是货架算法 + BLF算法的结合
-        for(int i = 0; i < rectangle_count; ++i)
+        LightMapInstanceGroup *single_texture = group;
+        for (int i = 0; i < group->group_instance_count; ++i)
         {
-            
+            // 如果是一张新开的图，那么就创建一个对角线
+            if (diagonals.size() == 0)
+            {
+                Diagonal diagonal;
+                if (GetADiagonalAndSetCenter(diagonal, single_texture, lightMapTexture, i, 0, 0))
+                {
+                    diagonals.push_back(diagonal);
+                }
+                else
+                {
+                    // 第一个矩形都放不下
+                    return false;
+                }
+            }
+            else
+            {
+                Diagonal &diagonal = diagonals.back();
+
+                RectangleForPacking rectangle_for_packing;
+                // 先尝试横着放
+                if (RectangleForPacking::try_get_place(single_texture->rectangle_width, single_texture->rectangle_height,
+                                                       diagonal.rectangles_row, rectangle_for_packing))
+                {
+                    // 找到了一个位置
+                    diagonal.rectangles.push_back(SingleResultLightMapRectangle(
+                        rectangle_for_packing.position_x,
+                        rectangle_for_packing.position_y,
+                        rectangle_for_packing.width,
+                        rectangle_for_packing.height,
+                        single_texture->rectangles_id[i],
+                        single_texture));
+                }
+                // 再尝试竖着放
+                else if (RectangleForPacking::try_get_place(single_texture->rectangle_height, single_texture->rectangle_width,
+                                                            diagonal.rectangles_column, rectangle_for_packing))
+                {
+                    // 找到了一个位置
+                    diagonal.rectangles.push_back(SingleResultLightMapRectangle(
+                        rectangle_for_packing.position_x,
+                        rectangle_for_packing.position_y,
+                        rectangle_for_packing.width,
+                        rectangle_for_packing.height,
+                        single_texture->rectangles_id[i],
+                        single_texture));
+                }
+                else
+                {
+                    // 如果横竖都放不下，那么就创建一个新的对角线
+                    Diagonal new_diagonal;
+                    if (GetADiagonalAndSetCenter(new_diagonal, single_texture, lightMapTexture, i,
+                                                 diagonal.position_x + diagonal.width, diagonal.position_y + diagonal.height))
+                    {
+                        diagonals.push_back(new_diagonal);
+                    }
+                    else
+                    {
+                        // 如果没有对角线的空间了，那么就返回false，那就是真的放不下了
+                        return false;
+                    }
+                }
+            }
         }
 
-        delete[] rectangles;
-        return false;
+        lightMapTexture->diagonals = diagonals;
+        return true;
     }
 };
 
@@ -139,21 +440,20 @@ struct LightMapTexture
 class LightmapPackerImpl
 {
 public:
-    LightmapPackerImpl() : textureCount(0), packingEfficiency(0.0f) {}
+    LightmapPackerImpl() {}
     ~LightmapPackerImpl() {}
 
-    int textureSize;
+    int textureSize = 2048;
     // 一个矩形的最小宽度，低于此宽度报错
     int min_rectangle_width = 1;
 
     std::function<void(const char *)> log_callback;
 
-    // 编码的效率
-    float packingEfficiency;
-    int textureCount;
     std::vector<OutputGroupData> results;
 
     std::vector<LightMapInstanceGroup> lightMapInstanceGroups;
+
+    vector<LightMapTexture *> lightMapTextures;
 
     // 使用的线程数量
     unsigned int threadCount;
@@ -161,6 +461,7 @@ public:
     void SetLogCallBack(std::function<void(const char *)> call_back)
     {
         log_callback = call_back;
+        global_log_callback = call_back;
     }
 
     void Log(const char *message)
@@ -194,7 +495,7 @@ public:
         lightMapInstanceGroup = *input_group_data;
         lightMapInstanceGroups.push_back(std::move(lightMapInstanceGroup));
 
-        Log("AddGroup: 组添加完成共有 %d 个矩形, 当前组数量: %d", input_group_data->rectangle_count, lightMapInstanceGroups.size());
+        Log("AddGroup: 组添加完成共有 %d 个矩形,宽度: %d 高度: %d 当前组数量: %d", input_group_data->rectangle_count, input_group_data->rectangle_width, input_group_data->rectangle_height, lightMapInstanceGroups.size());
         return true;
     }
 
@@ -207,15 +508,65 @@ public:
             return true;
         }
 
+        if (!CaculateMaxGroupScale())
+        {
+            Log("PackLightmaps: 计算最大缩放失败");
+            return false;
+        }
+
         // 由大到小排序
         std::sort(lightMapInstanceGroups.begin(), lightMapInstanceGroups.end(), [](const LightMapInstanceGroup &a, const LightMapInstanceGroup &b)
-                  { return a.source_rectangle_height > b.source_rectangle_height; });
+                  { return a.rectangle_width > b.rectangle_width; });
+
+        Log("PackLightmaps: 对以下组进行打包, 组数量: %d", group_count);
+        for (int i = 0; i < group_count; i++)
+        {
+            Log("PackLightmaps: 组 %d 宽度: %d 高度: %d 数量: %d", i, lightMapInstanceGroups[i].source_rectangle_width, lightMapInstanceGroups[i].source_rectangle_height, lightMapInstanceGroups[i].group_instance_count);
+        }
+
+        Log("PackLightmaps: 开始打包");
+
+        int texture_id = 0;
+        LightMapTexture *first_texture = new LightMapTexture();
+        first_texture->texture_size = textureSize;
+        first_texture->texture_index = texture_id++;
+        lightMapTextures.push_back(first_texture);
 
         for (int i = 0; i < group_count; i++)
         {
-            Log("PackLightmaps: 组 %d 宽度: %d 高度: %d", i, lightMapInstanceGroups[i].source_rectangle_width, lightMapInstanceGroups[i].source_rectangle_height);
+            bool is_success = false;
+            // 先尝试不缩放放入已有的纹理中
+            LightMapInstanceGroup &current_group = lightMapInstanceGroups[i];
+            for (int j = 0; j < lightMapTextures.size(); j++)
+            {
+                LightMapTexture *texture = lightMapTextures[j];
+                if (texture->TryAddGroup(current_group))
+                {
+                    Log("PackLightmaps: 组 %d 打包完成，放入纹理 %d", i, texture->texture_index);
+                    is_success = true;
+                    break;
+                }
+            }
+            // 放入新的纹理中
+            if (!is_success)
+            {
+                LightMapTexture *new_texture = new LightMapTexture();
+                new_texture->texture_size = textureSize;
+                new_texture->texture_index = texture_id++;
+                if (new_texture->TryAddGroup(current_group))
+                {
+                    Log("PackLightmaps: 组 %d 打包完成，放入新的纹理 %d", i, new_texture->texture_index);
+                    lightMapTextures.push_back(new_texture);
+                }
+                else
+                {
+                    Log("PackLightmaps: 组 %d 打包失败", i);
+                    return false;
+                }
+            }
         }
 
+        Log("PackLightmaps: 打包完成，共有 %d 个纹理", lightMapTextures.size());
         // auto startTime = std::chrono::high_resolution_clock::now();
 
         // // 获取系统线程数
@@ -234,22 +585,59 @@ public:
 
     int GetTextureCount() const
     {
-        return textureCount;
+        return lightMapTextures.size();
     }
 
     float GetPackingEfficiency() const
     {
-        return packingEfficiency;
+        return 1.0f;
     }
 
-    int GetResultCount() const
+    int GetTextureRectangleCount(int textureID) const
     {
-        return results.size();
+        if (textureID < 0 || textureID >= lightMapTextures.size())
+        {
+            return -1;
+        }
+        int rectangle_count = 0;
+        for (int i = 0; i < lightMapTextures[textureID]->diagonals.size(); i++)
+        {
+            rectangle_count += lightMapTextures[textureID]->diagonals[i].rectangles.size();
+        }
+        return rectangle_count;
     }
 
-    int GetResult(OutputGroupData *output_group_data) const
+    bool GetTextureResult(int textureID, OutLightMapTexture *output_group_data) const
     {
-        return -1;
+        if (textureID < 0 || textureID >= lightMapTextures.size())
+        {
+            return false;
+        }
+
+        LightMapTexture *texture = lightMapTextures[textureID];
+        output_group_data->texture_index = texture->texture_index;
+        output_group_data->texture_width = texture->texture_size;
+        output_group_data->texture_height = texture->texture_size;
+
+        int rectangle_count = GetTextureRectangleCount(textureID);
+        output_group_data->rectangle_count = rectangle_count;
+        int index = 0;
+        for (int i = 0; i < texture->diagonals.size(); i++)
+        {
+            for (int j = 0; j < texture->diagonals[i].rectangles.size(); j++)
+            {
+                SingleResultLightMapRectangle &rectangle = texture->diagonals[i].rectangles[j];
+                SingleOutPutRectangle &output_rectangle = output_group_data->rectangles[index];
+                output_rectangle.position_x = rectangle.position_x;
+                output_rectangle.position_y = rectangle.position_y;
+                output_rectangle.width = rectangle.width;
+                output_rectangle.height = rectangle.height;
+                output_rectangle.rectangle_id = rectangle.rectangle_id;
+                index++;
+            }
+        }
+
+        return true;
     }
 
     void TestLog()
@@ -262,42 +650,38 @@ public:
 
     bool CaculateMaxGroupScale()
     {
+
         for (int i = 0; i < lightMapInstanceGroups.size(); i++)
         {
+            LightMapInstanceGroup &current_group = lightMapInstanceGroups[i];
             float scale = 1.0f;
-            LightMapInstanceGroup &group = lightMapInstanceGroups[i];
-
-            int source_width = group.source_rectangle_width;
-            int source_height = group.source_rectangle_height;
-            int group_instance_count = group.group_instance_count;
-            int current_width = source_width;
-            int current_height = source_height;
-
             while (true)
             {
-                current_width = source_width * scale;
-                current_height = source_height * scale;
-
-                if (current_width <= min_rectangle_width)
+                if (current_group.source_rectangle_width * scale < min_rectangle_width ||
+                    current_group.source_rectangle_height * scale < min_rectangle_width)
                 {
-                    Log("CaculateMaxGroupScale: 矩形%d 宽度 %d 低于最小宽度 %d", group.rectangles[0], current_width, min_rectangle_width);
+                    Log("PackLightmaps: 组 %d 宽度 %d 高度 %d 低于最小宽度 %d", i, current_group.source_rectangle_width, current_group.source_rectangle_height, min_rectangle_width);
                     return false;
                 }
+                current_group.scale = scale;
+                current_group.rectangle_width = current_group.source_rectangle_width * scale;
+                current_group.rectangle_height = current_group.source_rectangle_height * scale;
 
-                // if (LightMapTexture::TryFitSize(textureSize, textureSize,
-                //                                 current_width, current_height,
-                //                                 group_instance_count))
-                // {
-                //     group.scale = scale;
-                //     group.rectangle_widht = current_width;
-                //     group.rectangle_height = current_height;
-                //     break;
-                // }
+                LightMapTexture *new_texture = new LightMapTexture();
+                new_texture->texture_size = textureSize;
+                new_texture->texture_index = -1;
+                if (new_texture->TryAddGroup(current_group))
+                {
+                    delete new_texture;
+                    break;
+                }
+                delete new_texture;
                 scale *= 0.5f;
             }
         }
     }
 };
+
 // C语言接口
 extern "C"
 {
@@ -336,14 +720,14 @@ extern "C"
         return static_cast<LightmapPackerImpl *>(packer)->GetPackingEfficiency();
     }
 
-    int GetResultCount(void *packer)
+    int GetTextureRectangleCount(void *packer, int textureID)
     {
-        return static_cast<LightmapPackerImpl *>(packer)->GetResultCount();
+        return static_cast<LightmapPackerImpl *>(packer)->GetTextureRectangleCount(textureID);
     }
 
-    int GetResult(void *packer, OutputGroupData *output_group_data)
+    bool GetTextureResult(void *packer, int textureID, OutLightMapTexture *output_group_data)
     {
-        return static_cast<LightmapPackerImpl *>(packer)->GetResult(output_group_data);
+        return static_cast<LightmapPackerImpl *>(packer)->GetTextureResult(textureID, output_group_data);
     }
 
     void TestLog(void *packer)
