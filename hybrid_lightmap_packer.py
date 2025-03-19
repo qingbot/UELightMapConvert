@@ -113,13 +113,19 @@ def get_lightmap_size_from_bias_scale(bias_scale,texture_size):
     padded_size_x = texture_size[0] * bias_scale[2] + 2
     padded_size_y = texture_size[1] * bias_scale[3] * 0.5 + 2
 
-    base_x = texture_size[0] * ( 0 + bias_scale[0] ) + 1
-    base_y = texture_size[1] * ( 0 + bias_scale[1] ) * 0.5 + 1
+    base_x = texture_size[0] * ( 0 + bias_scale[0] ) - 1
+    base_y = texture_size[1] * ( 0 + bias_scale[1] ) * 0.5 - 1
 
     return padded_size_x, padded_size_y, base_x, base_y
-    
-    
-    
+
+def caculate_bias_scale(width,height,position_x,position_y,texture_size):
+    """根据width,height,position_x,position_y,texture_size计算bias_scale"""
+    bias_scale = [0,0,0,0]
+    bias_scale[0] = position_x / texture_size[0]
+    bias_scale[1] = position_y / texture_size[1]
+    bias_scale[2] = width / texture_size[0]
+    bias_scale[3] = height / texture_size[1]
+    return bias_scale
 
 def extract_lightmap(lightmap_path, bias_scale):
     """根据bias_scale提取灯光贴图"""
@@ -497,7 +503,7 @@ def process_and_save_packed_textures(results, group_rectangles, texture_size=409
                 if rect_region.shape[0] != target_height or rect_region.shape[1] != target_width:
                     # 使用PIL进行高质量缩放
                     resized_img = Image.fromarray(rect_region)
-                    resized_img = resized_img.resize((target_width, target_height), Image.LANCZOS)
+                    resized_img = resized_img.resize((target_width, target_height), Image.NEAREST)
                     rect_region = np.array(resized_img)
                 
                 # 获取在打包纹理中的位置
@@ -796,11 +802,11 @@ def main():
         
         # 显示每个步骤占用的时间百分比
         print("\n时间分布:")
-        print(f"- 加载JSON数据: {step1_time/total_time*100:.1f}%")
-        print(f"- 按组整理数据: {step2_time/total_time*100:.1f}%")
-        print(f"- 执行贴图打包: {step3_time/total_time*100:.1f}%")
-        print(f"- 生成新贴图: {step4_time/total_time*100:.1f}%")
-        print(f"- 更新JSON数据: {step5_time/total_time*100:.1f}%")
+        print(f"- 加载JSON数据: {step1_time/total_time*100:.1f}%\t({step1_time}秒)")
+        print(f"- 按组整理数据: {step2_time/total_time*100:.1f}%\t({step2_time}秒)")
+        print(f"- 执行贴图打包: {step3_time/total_time*100:.1f}%\t({step3_time}秒)")
+        print(f"- 生成新贴图: {step4_time/total_time*100:.1f}%\t({step4_time}秒)")
+        print(f"- 更新JSON数据: {step5_time/total_time*100:.1f}%\t({step5_time}秒)")
         
         print(f"\n新的JSON文件已保存为: {new_json_path}")
         print(f"新的光照图文件保存在: {bigmap_dir}")
