@@ -24,7 +24,8 @@
 /ipch/
 /CMakeFiles/
 /cmake-build-*/
-
+/output/
+/CPP/output/
 # Visual Studio文件
 .vs/
 *.sln
