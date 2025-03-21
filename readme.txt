@@ -1,0 +1,12 @@
+lightmap的打包程序
+
+其中hybird_lightmap_packer.py 是执行打包的程序，它将解析来自虚幻的json，并交给C++执行打包，然后根据打包结果输出大图
+
+CPP文件夹内部的文件就是打包程序的源码，里面的build.bat是编译的脚本，将编译为一个dll
+
+convert_to_xml.py将json直接输出到对应的xml文件中，无需chaos重新导入
+
+GlobalParameter.py是打包程序所依赖的所有参数，以场景为单位组织
+
+ReCode_Terrain_LQ.py将地形拼接为一个大图并重新归一化的程序
+

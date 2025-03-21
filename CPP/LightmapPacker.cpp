@@ -353,6 +353,11 @@ public:
         }
         vector<Diagonal> diagonals = lightMapTexture->diagonals;
         // 算法的示例如下
+        // 0  0  0  0
+        // 0  0  0  0
+        // 0  0  0  0
+        // x  0  0  0
+        // =============
         // x  0  0  0
         // x  0  0  0
         // x  0  0  0

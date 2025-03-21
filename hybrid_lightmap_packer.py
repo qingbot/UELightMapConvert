@@ -12,7 +12,6 @@ Python负责:
 
 C++ DLL负责:
 - 高性能矩形装箱算法
-- 模拟退火优化
 - 多线程并行计算
 """
 
@@ -121,10 +120,10 @@ def get_lightmap_size_from_bias_scale(bias_scale,texture_size):
 def caculate_bias_scale(width,height,position_x,position_y,texture_size):
     """根据width,height,position_x,position_y,texture_size计算bias_scale"""
     bias_scale = [0,0,0,0]
-    bias_scale[0] = position_x / texture_size[0]
-    bias_scale[1] = position_y / texture_size[1]
-    bias_scale[2] = width / texture_size[0]
-    bias_scale[3] = height / texture_size[1]
+    bias_scale[0] = (position_x + 1) / texture_size
+    bias_scale[1] = (position_y + 1) / texture_size
+    bias_scale[2] = (width-2) / texture_size
+    bias_scale[3] = (height-2) / texture_size
     return bias_scale
 
 def extract_lightmap(lightmap_path, bias_scale):
@@ -521,12 +520,13 @@ def process_and_save_packed_textures(results, group_rectangles, texture_size=409
                         # 计算新的BiasScale (基于打包纹理的UV坐标)
                         texture_width = texture_info["width"]
                         texture_height = texture_info["height"]
-                        new_bias_scale = [
-                            float(target_x) / texture_width,      # u_min
-                            float(target_y) / texture_height,     # v_min
-                            float(w) / texture_width,             # width
-                            float(h) / texture_height             # height
-                        ]
+                        # new_bias_scale = [
+                        #     float(target_x) / texture_width,      # u_min
+                        #     float(target_y) / texture_height,     # v_min
+                        #     float(w) / texture_width,             # width
+                        #     float(h) / texture_height             # height
+                        # ]
+                        new_bias_scale = caculate_bias_scale( w,h,target_x, target_y, texture_width)
                         
                         # 记录矩形信息
                         texture_info["rectangles"].append({
@@ -553,7 +553,7 @@ def process_and_save_packed_textures(results, group_rectangles, texture_size=409
                         updated_lightmap_info[mesh_id] = {
                             "mesh_id": mesh_id,
                             "texture_index": texture.texture_index,
-                            "new_lq": new_lightmap_path,
+                            "new_lq": f"packed_lightmap_{texture.texture_index}",
                             "new_bias_scale": new_bias_scale,
                             "scale_factor": 1.0  # 默认缩放因子
                         }
@@ -581,54 +581,33 @@ def process_and_save_packed_textures(results, group_rectangles, texture_size=409
     
     return updated_lightmap_info
 
-def main():
-    parser = argparse.ArgumentParser(description="混合架构灯光贴图打包工具")
-    parser.add_argument("--json", type=str, default=None, 
-                        help="JSON文件路径")
-    parser.add_argument("--lightmap", type=str, default="./light/light_map",
-                        help="灯光贴图目录路径")
-    parser.add_argument("--output", type=str, default=None,
-                        help="输出目录路径，默认为./output/lightmaps")
-    # parser.add_argument("--algorithm", type=str, choices=["simulated_annealing", "traditional"],
-    #                     default="simulated_annealing", help="打包算法")
-    parser.add_argument("--texture-size", type=int, default=2048,
-                        help="输出纹理大小，默认为2048")
-    parser.add_argument("--min-texture-size", type=int, default=16,
-                        help="最小纹理大小，默认为16")
-    parser.add_argument("--dll", type=str, default=None,
-                        help="LightmapPacker.dll路径，如果不指定则自动搜索")
-    
-    parser.add_argument("--scene", type=str, default=GlobalParameter.DEFAULT_LIGHT_MAP_SCENE_NAME,
-                        help="场景名称，默认为basic_level")
-    
+def go_main(parser):
     args = parser.parse_args()
     
-    # args.scene = "basic_level"
-    # 根据场景名称获取JSON路径（如果未指定）
-    # if args.json is None:
-    #     try:
-    #         args.json = get_lightmap_path(args.scene)
-    #         print(f"根据场景名称'{args.scene}'获取JSON路径: {args.json}")
-    #     except Exception as e:
-    #         print(f"无法根据场景名称获取JSON路径: {e}")
-    #         print("请指定--json参数")
-    #         return
-    if args.scene is not None:
-        args.texture_size = GlobalParameter.ALL_LIGHT_MAP_DATA[args.scene].get(
-            "lightmap_texture_size", args.texture_size)
-        args.min_texture_size = GlobalParameter.ALL_LIGHT_MAP_DATA[args.scene].get(
-            "lightmap_texture_min_size", args.min_texture_size)
-        args.json = get_lightmap_path(args.scene)
+    # 从GlobalParameter获取场景相关参数
+    scene_data = GlobalParameter.ALL_LIGHT_MAP_DATA.get(args.scene, {})
+    if not scene_data:
+        print(f"错误: 找不到场景 '{args.scene}' 的配置数据")
+        return
+    
+    # 获取各项参数
+    json_path = scene_data.get("source_lightmap_json_path")
+    lightmap_base_dir = scene_data.get("source_lightmap_texture_path")
+    texture_size = scene_data.get("lightmap_texture_size", 2048)
+    min_texture_size = scene_data.get("lightmap_texture_min_size", 16)
+    
+    print(f"场景: {args.scene}")
+    print(f"JSON路径: {json_path}")
+    print(f"灯光贴图路径: {lightmap_base_dir}")
+    print(f"纹理大小: {texture_size}")
+    print(f"最小纹理大小: {min_texture_size}")
     
     # 设置输出路径
-    if args.output is None:
-        args.output = os.path.join("./output/lightmaps", args.scene)
+    output_dir = os.path.join("./output/lightmaps", args.scene)
+    os.makedirs(output_dir, exist_ok=True)
     
-    # 确保输出目录存在
-    os.makedirs(args.output, exist_ok=True)
-    
-    # 获取新的JSON路径 - 修改为与源JSON在相同位置
-    source_json_dir = os.path.dirname(args.json)
+    # 获取新的JSON路径 - 与源JSON在相同位置
+    source_json_dir = os.path.dirname(json_path)
     new_json_path = os.path.join(source_json_dir, get_new_json_path())
     
     try:
@@ -636,7 +615,7 @@ def main():
         
         # 步骤1: 加载JSON数据
         step1_start_time = time.time()
-        json_data = load_json_data(args.json)
+        json_data = load_json_data(json_path)
         step1_time = time.time() - step1_start_time
         print(f"步骤1: 加载JSON数据完成，耗时: {step1_time:.2f}秒")
         
@@ -652,17 +631,6 @@ def main():
             return
         
         # 步骤2.5: 计算每个物体实际需要的lightmap大小
-        # print("步骤2.5: 计算每个物体的lightmap实际大小...")
-        # 获取灯光贴图基础路径
-        lightmap_base_dir = args.lightmap
-        if args.scene in GlobalParameter.ALL_LIGHT_MAP_DATA:
-            texture_base_path = GlobalParameter.ALL_LIGHT_MAP_DATA[args.scene].get(
-                "source_lightmap_texture_path", lightmap_base_dir)
-            if texture_base_path:
-                lightmap_base_dir = texture_base_path
-        
-        print(f"灯光贴图基础路径: {lightmap_base_dir}")
-        
         # 遍历每个组，计算实际的lightmap大小
         group_rectangles = {}
         
@@ -697,8 +665,8 @@ def main():
                     pixel_height = int(padded_size_y)
                     
                     # 确保最小尺寸
-                    pixel_width = max(pixel_width, args.min_texture_size)
-                    pixel_height = max(pixel_height, args.min_texture_size)
+                    pixel_width = max(pixel_width, min_texture_size)
+                    pixel_height = max(pixel_height, min_texture_size)
                     info = {
                         "mesh_id": mesh_id,
                         "name": item.get("name", mesh_id),
@@ -723,7 +691,7 @@ def main():
         
         # 初始化C++ DLL
         try:
-            packer = LightmapPackerPython(args.dll)
+            packer = LightmapPackerPython(None)  # 使用默认DLL路径
             print("成功加载LightmapPacker DLL")
         except Exception as e:
             print(f"加载LightmapPacker DLL失败: {e}")
@@ -732,7 +700,7 @@ def main():
         packer.set_log_callback(default_log_callback)
         
         # 设置DLL参数
-        packer.set_texture_size(args.texture_size)
+        packer.set_texture_size(texture_size)
         
         # 向C++传递组和矩形信息
         print(f"向C++传递 {len(group_rectangles)} 个组的矩形信息...")
@@ -758,7 +726,7 @@ def main():
         print(f"步骤3: 执行贴图打包完成，耗时: {step3_time:.2f}秒")
         
         # 保存打包结果到JSON
-        debug_output_path = os.path.join(args.output, "packing_debug.json")
+        debug_output_path = os.path.join(output_dir, "packing_debug.json")
         save_packing_results_to_json(results, groups, debug_output_path)
          
         # 步骤4: 处理并保存打包纹理
@@ -772,7 +740,7 @@ def main():
         updated_lightmap_info = process_and_save_packed_textures(
             results, 
             group_rectangles,
-            texture_size=args.texture_size, 
+            texture_size=texture_size, 
             output_dir=bigmap_dir,  # 使用BigMap目录
             lightmap_base_dir=lightmap_base_dir
         )
@@ -797,16 +765,15 @@ def main():
         total_time = time.time() - total_start_time
         print("\n=== 处理完成 ===")
         print(f"总共处理了 {len(results)} 个对象")
-        # print(f"生成了 {texture_count} 个打包贴图")
         print(f"总耗时: {total_time:.2f}秒")
         
         # 显示每个步骤占用的时间百分比
         print("\n时间分布:")
-        print(f"- 加载JSON数据: {step1_time/total_time*100:.1f}%\t({step1_time}秒)")
-        print(f"- 按组整理数据: {step2_time/total_time*100:.1f}%\t({step2_time}秒)")
-        print(f"- 执行贴图打包: {step3_time/total_time*100:.1f}%\t({step3_time}秒)")
-        print(f"- 生成新贴图: {step4_time/total_time*100:.1f}%\t({step4_time}秒)")
-        print(f"- 更新JSON数据: {step5_time/total_time*100:.1f}%\t({step5_time}秒)")
+        print(f"- 加载JSON数据: {step1_time/total_time*100:.1f}%\t({step1_time:.2f}秒)")
+        print(f"- 按组整理数据: {step2_time/total_time*100:.1f}%\t({step2_time:.2f}秒)")
+        print(f"- 执行贴图打包: {step3_time/total_time*100:.1f}%\t({step3_time:.2f}秒)")
+        print(f"- 生成新贴图: {step4_time/total_time*100:.1f}%\t({step4_time:.2f}秒)")
+        print(f"- 更新JSON数据: {step5_time/total_time*100:.1f}%\t({step5_time:.2f}秒)")
         
         print(f"\n新的JSON文件已保存为: {new_json_path}")
         print(f"新的光照图文件保存在: {bigmap_dir}")
@@ -814,6 +781,15 @@ def main():
     except Exception as e:
         print(f"处理过程中出错: {e}")
         print(traceback.format_exc())
+
+
+def main():
+    parser = argparse.ArgumentParser(description="混合架构灯光贴图打包工具")
+    parser.add_argument("--scene", type=str, default=GlobalParameter.DEFAULT_LIGHT_MAP_SCENE_NAME,
+                        help="场景名称，默认为basic_level")
+
+    parser.scene = "carcassonne"
+    go_main(parser)
 
 if __name__ == "__main__":
     main() 
