@@ -8,7 +8,6 @@ import argparse
 from PIL import Image
 import GlobalParameter
 
-
 # 当前的场景名称, 由用户输入
 CURRENT_LIGHT_MAP_SCENE_NAME = GlobalParameter.DEFAULT_LIGHT_MAP_SCENE_NAME
 
@@ -74,22 +73,6 @@ def create_lightmap_component(parent, lightmap_data, object_name):
     group = ET.SubElement(lightmap_comp, "group")
     group.text = "default"
     
-    # 添加HQ元素
-    hq = ET.SubElement(lightmap_comp, "HQ")
-    hq_url = ET.SubElement(hq, "url")
-    
-    # 尝试提取HQ值,考虑不同的键名和数据结构
-    hq_value = extract_value(actual_lightmap_data, ["HQ", "hq", "highquality", "high_quality"])
-    if hq_value:
-        hq_url.text = f"{lightmap_path}/{hq_value}.texture.ast"
-    else:
-        hq_url.text = ""
-    
-    # 添加guid和parameter元素到HQ
-    guid_hq = ET.SubElement(hq, "guid")
-    param_hq = ET.SubElement(hq, "parameter")
-    params_hq = ET.SubElement(param_hq, "parameters")
-    
     # 添加LQ元素
     lq = ET.SubElement(lightmap_comp, "LQ")
     lq_url = ET.SubElement(lq, "url")
@@ -105,6 +88,22 @@ def create_lightmap_component(parent, lightmap_data, object_name):
     guid_lq = ET.SubElement(lq, "guid")
     param_lq = ET.SubElement(lq, "parameter")
     params_lq = ET.SubElement(param_lq, "parameters")
+    
+    # 添加Dir元素
+    dir_elem = ET.SubElement(lightmap_comp, "Dir")
+    dir_url = ET.SubElement(dir_elem, "url")
+    
+    # 尝试提取Dir值,考虑不同的键名和数据结构
+    dir_value = extract_value(actual_lightmap_data, ["Dir", "dir", "direction", "DIR"])
+    if dir_value:
+        dir_url.text = f"{lightmap_path}/{dir_value}.texture.ast"
+    else:
+        dir_url.text = ""
+    
+    # 添加guid和parameter元素到Dir
+    guid_dir = ET.SubElement(dir_elem, "guid")
+    param_dir = ET.SubElement(dir_elem, "parameter")
+    params_dir = ET.SubElement(param_dir, "parameters")
     
     # 添加BiasScale元素
     bias_scale = ET.SubElement(lightmap_comp, "BiasScale")
@@ -487,77 +486,26 @@ def parse_arguments():
     parser = argparse.ArgumentParser(description="从JSON文件提取Lightmap信息并更新到XML文件")
     
     # 添加场景名称参数
-    parser.add_argument("--scene", "-s", type=str, default=DEFAULT_LIGHT_MAP_SCENE_NAME,
-                        help=f"指定要处理的场景名称，默认为{DEFAULT_LIGHT_MAP_SCENE_NAME}")
-    
-    # 添加多场景处理参数
-    parser.add_argument("--all", "-a", action="store_true",
-                        help="处理所有可用的场景")
-    
-    # 添加多场景列表参数
-    parser.add_argument("--scenes", type=str,
-                        help="指定要处理的多个场景，用逗号分隔，例如: scene1,scene2,scene3")
-    
-    # 添加测试模式参数
-    parser.add_argument("--test", "-t", action="store_true",
-                        help="使用测试文件代替实际文件")
-    
-    # 添加输出路径参数
-    parser.add_argument("--output", "-o", type=str,
-                        help="指定输出文件路径，默认为<原文件名>_updated.ast")
-    
-    # 添加详细模式参数
-    parser.add_argument("--verbose", "-v", action="store_true",
-                        help="输出详细的处理信息")
-    
-    # 添加列出所有场景参数
-    parser.add_argument("--list-scenes", "-l", action="store_true",
-                        help="列出所有可用的场景配置")
+    parser.add_argument("--scene", "-s", type=str, default=CURRENT_LIGHT_MAP_SCENE_NAME,
+                        help=f"指定要处理的场景名称，默认为{CURRENT_LIGHT_MAP_SCENE_NAME}")
     
     # 解析参数
     args = parser.parse_args()
     
-    # 处理列出所有场景
-    if args.list_scenes:
-        print("可用的场景配置:")
-        for scene_name, config in GlobalParameter.ALL_LIGHT_MAP_DATA.items():
-            print(f"  - {scene_name}:")
-            for key, value in config.items():
-                print(f"      {key}: {value}")
-        sys.exit(0)
+    # 检查场景是否存在
+    if args.scene not in GlobalParameter.ALL_LIGHT_MAP_DATA:
+        print(f"错误: 指定的场景 '{args.scene}' 不存在")
+        print(f"可用的场景有: {', '.join(GlobalParameter.ALL_LIGHT_MAP_DATA.keys())}")
+        sys.exit(1)
     
-    # 确定要处理的场景列表
-    scenes_to_process = []
-    
-    if args.all:
-        # 处理所有场景
-        scenes_to_process = list(GlobalParameter.ALL_LIGHT_MAP_DATA.keys())
-    elif args.scenes:
-        # 处理指定的多个场景
-        scenes_to_process = [scene.strip() for scene in args.scenes.split(',')]
-        # 检查指定的场景是否都存在
-        for scene in scenes_to_process:
-            if scene not in GlobalParameter.ALL_LIGHT_MAP_DATA:
-                print(f"错误: 指定的场景 '{scene}' 不存在")
-                print(f"可用的场景有: {', '.join(GlobalParameter.ALL_LIGHT_MAP_DATA.keys())}")
-                sys.exit(1)
-    else:
-        # 处理单个场景
-        if args.scene not in GlobalParameter.ALL_LIGHT_MAP_DATA:
-            print(f"错误: 指定的场景 '{args.scene}' 不存在")
-            print(f"可用的场景有: {', '.join(GlobalParameter.ALL_LIGHT_MAP_DATA.keys())}")
-            sys.exit(1)
-        scenes_to_process = [args.scene]
-    
-    return args, scenes_to_process
+    return args.scene
 
-def process_scene(scene_name, use_test_files, output_path=None, verbose=False):
+def process_scene(scene_name):
     """处理单个场景"""
-    global CURRENT_LIGHT_MAP_SCENE_NAME, USE_TEST_FILES
+    global CURRENT_LIGHT_MAP_SCENE_NAME
     
     # 设置全局变量
     CURRENT_LIGHT_MAP_SCENE_NAME = scene_name
-    USE_TEST_FILES = use_test_files
     
     # 获取场景配置
     scene_config = GlobalParameter.ALL_LIGHT_MAP_DATA[scene_name]
@@ -567,28 +515,8 @@ def process_scene(scene_name, use_test_files, output_path=None, verbose=False):
     print(f"JSON数据文件: {scene_config['source_lightmap_json_path']}")
     print(f"Lightmap路径: {scene_config['lightmap_path_in_chaos_assets']}")
     
-    # 是否使用测试文件
-    if use_test_files:
-        print(f"使用测试文件: {TEST_JSON_PATH}, {TEST_XML_PATH}")
-    
     # 更新XML文件
     result_path = update_xml_with_json()
-    
-    # 如果指定了输出路径，重命名文件
-    if output_path:
-        # 为多场景处理添加场景名前缀
-        if len(output_path) > 0:
-            base_name, ext = os.path.splitext(output_path)
-            scene_output = f"{base_name}_{scene_name}{ext}"
-        else:
-            scene_output = f"{scene_name}_updated.ast"
-        
-        try:
-            os.rename(result_path, scene_output)
-            print(f"已将输出文件重命名为: {scene_output}")
-            result_path = scene_output
-        except Exception as e:
-            print(f"重命名输出文件失败: {str(e)}")
     
     print(f"场景 {scene_name} 处理完成! 输出文件: {result_path}")
     return result_path
@@ -596,35 +524,20 @@ def process_scene(scene_name, use_test_files, output_path=None, verbose=False):
 def main():
     """主函数"""
     # 解析命令行参数
-    args, scenes_to_process = parse_arguments()
+    scene_name = parse_arguments()
     
     try:
-        print(f"将处理 {len(scenes_to_process)} 个场景: {', '.join(scenes_to_process)}")
+        print(f"将处理场景: {scene_name}")
         
-        results = []
-        for scene_name in scenes_to_process:
-            try:
-                output_path = process_scene(scene_name, args.test, args.output, args.verbose)
-                results.append((scene_name, output_path, "成功"))
-            except Exception as e:
-                print(f"处理场景 {scene_name} 失败: {str(e)}")
-                if args.verbose:
-                    import traceback
-                    traceback.print_exc()
-                results.append((scene_name, None, f"失败: {str(e)}"))
-        
-        # 打印处理结果摘要
-        print("\n处理结果摘要:")
-        for scene_name, output_path, status in results:
-            print(f"  - {scene_name}: {status}")
-            if output_path:
-                print(f"    输出文件: {output_path}")
-        
-        # 统计成功和失败的场景数量
-        success_count = sum(1 for _, _, status in results if status == "成功")
-        fail_count = len(results) - success_count
-        
-        print(f"\n总计: {len(results)} 个场景, {success_count} 个成功, {fail_count} 个失败")
+        try:
+            output_path = process_scene(scene_name)
+            print(f"\n处理结果: 成功")
+            print(f"输出文件: {output_path}")
+        except Exception as e:
+            print(f"\n处理结果: 失败")
+            print(f"处理场景 {scene_name} 失败: {str(e)}")
+            import traceback
+            traceback.print_exc()
         
     except Exception as e:
         print(f"处理失败: {str(e)}")

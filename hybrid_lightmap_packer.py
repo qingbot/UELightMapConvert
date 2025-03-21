@@ -314,6 +314,9 @@ def update_json_data(json_data, new_lightmap_info):
                 if "LightMap" in mesh_data:
                     # 更新灯光贴图路径
                     mesh_data["LightMap"]["LQ"] = info["new_lq"]
+                    # 添加Dir信息
+                    if "new_dir" in info:
+                        mesh_data["LightMap"]["Dir"] = info["new_dir"]
                     # 更新BiasScale
                     mesh_data["LightMap"]["BiasScale"] = info["new_bias_scale"]
                     updated_count += 1
@@ -334,6 +337,9 @@ def update_json_data(json_data, new_lightmap_info):
                 if "LightMap" in actor_data:
                     # 更新灯光贴图路径
                     actor_data["LightMap"]["LQ"] = info["new_lq"]
+                    # 添加Dir信息
+                    if "new_dir" in info:
+                        actor_data["LightMap"]["Dir"] = info["new_dir"]
                     # 更新BiasScale
                     actor_data["LightMap"]["BiasScale"] = info["new_bias_scale"]
                     updated_count += 1
@@ -418,16 +424,27 @@ def process_and_save_packed_textures(results, group_rectangles, texture_size=409
     if not lightmap_base_dir:
         lightmap_base_dir = "."
     
-    # 创建空白纹理
+    # 创建空白纹理 - 分别为LQ和Dir创建纹理
     packed_textures = []
+    packed_textures_dir = []  # 为Dir创建单独的纹理
     for texture in results:
-        # 创建指定大小的RGBA纹理，初始为全透明
+        # 创建指定大小的RGBA纹理，初始为全透明（LQ - 上半部分）
         texture_array = np.zeros((texture.texture_height, texture.texture_width, 4), dtype=np.uint8)
         packed_textures.append({
             "texture_index": texture.texture_index,
             "width": texture.texture_width,
             "height": texture.texture_height,
             "array": texture_array,
+            "rectangles": []
+        })
+        
+        # 创建指定大小的RGBA纹理，初始为全透明（Dir - 下半部分）
+        texture_array_dir = np.zeros((texture.texture_height, texture.texture_width, 4), dtype=np.uint8)
+        packed_textures_dir.append({
+            "texture_index": texture.texture_index,
+            "width": texture.texture_width,
+            "height": texture.texture_height,
+            "array": texture_array_dir,
             "rectangles": []
         })
     
@@ -437,6 +454,7 @@ def process_and_save_packed_textures(results, group_rectangles, texture_size=409
     # 处理每个纹理和其中的矩形
     for texture_idx, texture_info in enumerate(packed_textures):
         texture = results[texture_idx]
+        texture_dir_info = packed_textures_dir[texture_idx]  # 获取对应的Dir纹理信息
         print(f"处理纹理 {texture.texture_index}，包含 {texture.rectangle_count} 个矩形")
         
         # 遍历该纹理中的所有矩形
@@ -481,29 +499,50 @@ def process_and_save_packed_textures(results, group_rectangles, texture_size=409
                 padded_size_x, padded_size_y, base_x, base_y = get_lightmap_size_from_bias_scale(
                     original_bias_scale, (img_width, img_height))
                 
-                # 计算像素坐标（注意y坐标和高度只使用上半部分）
+                # 计算像素坐标（上半部分 - LQ）
                 x_min = int(base_x)
                 y_min = int(base_y)
                 x_max = int(x_min + padded_size_x)
                 y_max = int(y_min + padded_size_y)
                 
-                # 边界检查
+                # 边界检查（上半部分）
                 x_min = max(0, min(x_min, img_width - 1))
                 y_min = max(0, min(y_min, img_height - 1))
                 x_max = max(x_min + 1, min(x_max, img_width))
                 y_max = max(y_min + 1, min(y_max, img_height))
                 
-                # 提取区域
+                # 提取上半部分区域（LQ）
                 rect_region = img_array[y_min:y_max, x_min:x_max]
+                
+                # 计算下半部分坐标（Dir）- 与上半部分相对应，但y坐标偏移到下半部分
+                # 假设图像是对称的，下半部分与上半部分相同
+                y_min_dir = int(base_y + img_height / 2)  # 移动到下半部分
+                y_max_dir = int(y_min_dir + padded_size_y)
+                
+                # 边界检查（下半部分）
+                y_min_dir = max(0, min(y_min_dir, img_height - 1))
+                y_max_dir = max(y_min_dir + 1, min(y_max_dir, img_height))
+                
+                # 提取下半部分区域（Dir）
+                rect_region_dir = img_array[y_min_dir:y_max_dir, x_min:x_max]
                 
                 # 确保提取的区域与目标大小匹配（可能需要缩放）
                 target_width = rect.width
                 target_height = rect.height
+                
+                # 缩放上半部分（LQ）
                 if rect_region.shape[0] != target_height or rect_region.shape[1] != target_width:
                     # 使用PIL进行高质量缩放
                     resized_img = Image.fromarray(rect_region)
                     resized_img = resized_img.resize((target_width, target_height), Image.NEAREST)
                     rect_region = np.array(resized_img)
+                
+                # 缩放下半部分（Dir）
+                if rect_region_dir.shape[0] != target_height or rect_region_dir.shape[1] != target_width:
+                    # 使用PIL进行高质量缩放
+                    resized_img_dir = Image.fromarray(rect_region_dir)
+                    resized_img_dir = resized_img_dir.resize((target_width, target_height), Image.NEAREST)
+                    rect_region_dir = np.array(resized_img_dir)
                 
                 # 获取在打包纹理中的位置
                 target_x = rect.position_x
@@ -512,27 +551,33 @@ def process_and_save_packed_textures(results, group_rectangles, texture_size=409
                 # 确保不会超出边界
                 try:
                     h, w = rect_region.shape[:2]
+                    h_dir, w_dir = rect_region_dir.shape[:2]
                     
                     if target_x + w <= texture_info["width"] and target_y + h <= texture_info["height"]:
-                        # 将提取的区域复制到目标纹理
+                        # 将上半部分区域复制到LQ纹理
                         texture_info["array"][target_y:target_y+h, target_x:target_x+w] = rect_region
+                        
+                        # 将下半部分区域复制到Dir纹理
+                        texture_dir_info["array"][target_y:target_y+h_dir, target_x:target_x+w_dir] = rect_region_dir
                         
                         # 计算新的BiasScale (基于打包纹理的UV坐标)
                         texture_width = texture_info["width"]
                         texture_height = texture_info["height"]
-                        # new_bias_scale = [
-                        #     float(target_x) / texture_width,      # u_min
-                        #     float(target_y) / texture_height,     # v_min
-                        #     float(w) / texture_width,             # width
-                        #     float(h) / texture_height             # height
-                        # ]
-                        new_bias_scale = caculate_bias_scale( w,h,target_x, target_y, texture_width)
+                        new_bias_scale = caculate_bias_scale(w, h, target_x, target_y, texture_width)
                         
-                        # 记录矩形信息
+                        # 记录矩形信息（LQ）
                         texture_info["rectangles"].append({
                             "mesh_id": mesh_id,
                             "position": (target_x, target_y),
                             "size": (w, h),
+                            "rectangle_id": rect_id
+                        })
+                        
+                        # 记录矩形信息（Dir）
+                        texture_dir_info["rectangles"].append({
+                            "mesh_id": mesh_id,
+                            "position": (target_x, target_y),
+                            "size": (w_dir, h_dir),
                             "rectangle_id": rect_id
                         })
                         
@@ -541,19 +586,23 @@ def process_and_save_packed_textures(results, group_rectangles, texture_size=409
                             # 尝试生成相对路径
                             rel_output_dir = os.path.relpath(output_dir, os.path.dirname(lightmap_base_dir))
                             new_lightmap_path = os.path.join(rel_output_dir, f"packed_lightmap_{texture.texture_index}.png")
+                            new_dir_lightmap_path = os.path.join(rel_output_dir, f"packed_lightmap_{texture.texture_index}_dir.png")
                         except ValueError as e:
                             # 如果发生错误(如跨驱动器)，则使用直接的文件名
                             print(f"注意: 跨驱动器路径问题，使用文件名作为路径: {e}")
                             new_lightmap_path = f"packed_lightmap_{texture.texture_index}.png"
+                            new_dir_lightmap_path = f"packed_lightmap_{texture.texture_index}_dir.png"
                         
                         # 确保路径分隔符一致
                         new_lightmap_path = new_lightmap_path.replace("\\", "/")
+                        new_dir_lightmap_path = new_dir_lightmap_path.replace("\\", "/")
                         
-                        # 更新lightmap信息
+                        # 更新lightmap信息，增加Dir信息
                         updated_lightmap_info[mesh_id] = {
                             "mesh_id": mesh_id,
                             "texture_index": texture.texture_index,
                             "new_lq": f"packed_lightmap_{texture.texture_index}",
+                            "new_dir": f"packed_lightmap_{texture.texture_index}_dir",  # 新增Dir信息
                             "new_bias_scale": new_bias_scale,
                             "scale_factor": 1.0  # 默认缩放因子
                         }
@@ -572,12 +621,19 @@ def process_and_save_packed_textures(results, group_rectangles, texture_size=409
     
     # 保存打包后的纹理
     saved_paths = []
-    for texture_info in packed_textures:
+    for texture_idx, texture_info in enumerate(packed_textures):
+        # 保存LQ纹理
         texture_idx = texture_info["texture_index"]
         output_path = os.path.join(output_dir, f"packed_lightmap_{texture_idx}.png")
         Image.fromarray(texture_info["array"]).save(output_path)
         saved_paths.append(output_path)
-        print(f"已保存打包纹理: {output_path}")
+        print(f"已保存LQ打包纹理: {output_path}")
+        
+        # 保存Dir纹理
+        output_path_dir = os.path.join(output_dir, f"packed_lightmap_{texture_idx}_dir.png")
+        Image.fromarray(packed_textures_dir[texture_idx]["array"]).save(output_path_dir)
+        saved_paths.append(output_path_dir)
+        print(f"已保存Dir打包纹理: {output_path_dir}")
     
     return updated_lightmap_info
 
