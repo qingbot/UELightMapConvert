@@ -6,7 +6,7 @@ ALL_LIGHT_MAP_DATA = {
         # 从虚幻里导出的场景的JSON文件
         "source_lightmap_json_path" : "C:/chaos_integrated_tools/data_analysis4/scene/current_scene_data_source.json",
         # 场景的Chaos的XML文件
-        "source_scene_xml_path" : "D:/test/scene/layout_layer_N0000_E0000.layout_block.ast",
+        "source_scene_xml_folder_path" : "D:/test/scene",
         # 在chaos的Runtime时记录的Lightmap的相对路径，就是资源的引用，该路径仅用于更新xml里面的资源路径，不涉及具体的资源读写
         "lightmap_path_in_chaos_assets" : "_project/New Folder1/lightMaps",
         # 地形的Chaos的XML文件
@@ -29,8 +29,8 @@ ALL_LIGHT_MAP_DATA = {
     "carcassonne" : {
         "source_lightmap_texture_path" : "C:/chaos_integrated_tools/data_analysis/scene/light/light_map",
         "source_lightmap_json_path" : "C:/chaos_integrated_tools/data_analysis/scene/current_scene_data.json",
-        "source_scene_xml_path" : "D:/test/scene/layout_layer_N0000_E0000.layout_block.ast",
-        "lightmap_path_in_chaos_assets" : "_project/New Folder1/lightMaps",
+        "source_scene_xml_folder_path" : "D:/test/scene",
+        "lightmap_path_in_chaos_assets" : "_project/testSimpleLM/lightMaps",
         "source_terrain_xml_path" : "C:/Users/qingbo.tang/Desktop/ai/basic_level.terrain.ast",
         "terrain_size_offset" : [512,512,512,512],
         "lightmap_texture_size" : 2048,
