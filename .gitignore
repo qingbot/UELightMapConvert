@@ -26,6 +26,9 @@
 /cmake-build-*/
 /output/
 /CPP/output/
+
+/backup/
+
 # Visual Studio文件
 .vs/
 *.sln

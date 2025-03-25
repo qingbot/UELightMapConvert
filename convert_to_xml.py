@@ -7,6 +7,7 @@ import sys
 import argparse
 from PIL import Image
 import GlobalParameter
+from datetime import datetime
 
 # 当前的场景名称, 由用户输入
 CURRENT_LIGHT_MAP_SCENE_NAME = GlobalParameter.DEFAULT_LIGHT_MAP_SCENE_NAME
@@ -337,6 +338,16 @@ def update_xml_with_json(xml_path=None):
     
     print(f"找到 {len(xml_files)} 个XML文件需要处理")
     
+    # 创建backup目录
+    backup_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backup")
+    os.makedirs(backup_dir, exist_ok=True)
+    
+    # 创建以时间戳命名的子目录
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_subdir = os.path.join(backup_dir, timestamp)
+    os.makedirs(backup_subdir, exist_ok=True)
+    print(f"创建备份子目录: {backup_subdir}")
+    
     updated_files = []
     
     # 处理每个XML文件
@@ -494,20 +505,24 @@ def update_xml_with_json(xml_path=None):
                 print(f"警告: 在 {xml_file} 中未找到任何匹配的物体进行更新!")
                 continue
             
-            # 保存修改后的XML文件
-            output_path = xml_file.replace(".ast", "_updated.ast")
-            if output_path == xml_file:  # 防止覆盖原文件
-                output_path = xml_file + ".updated"
+            # 使用原始文件名创建备份文件
+            xml_filename = os.path.basename(xml_file)
+            backup_path = os.path.join(backup_subdir, xml_filename)
             
-            # 使用自定义函数保存,保持原有的标签名称
-            save_xml_with_original_tags(tree, output_path, xml_file)
+            # 复制原文件作为备份
+            import shutil
+            shutil.copy2(xml_file, backup_path)
+            print(f"已创建备份文件: {backup_path}")
+            
+            # 保存到原文件
+            save_xml_with_original_tags(tree, xml_file, xml_file)
             
             print(f"已更新 {updated_count} 个物体的LightMap组件,新创建了 {created_count} 个LightMap组件")
-            print(f"已将更新后的XML保存到: {output_path}")
+            print(f"已将更新后的XML保存回原文件: {xml_file}")
             
             updated_files.append({
                 "original_path": xml_file, 
-                "updated_path": output_path,
+                "backup_path": backup_path,
                 "updated_count": updated_count,
                 "created_count": created_count
             })
@@ -559,7 +574,8 @@ def process_scene(scene_name):
     if updated_files:
         print(f"\n场景 {scene_name} 处理完成! 更新了 {len(updated_files)} 个XML文件:")
         for file_info in updated_files:
-            print(f"  - {file_info['original_path']} -> {file_info['updated_path']} (更新: {file_info['updated_count']}, 创建: {file_info['created_count']})")
+            print(f"  - {file_info['original_path']} (更新: {file_info['updated_count']}, 创建: {file_info['created_count']})")
+            print(f"    备份文件: {file_info['backup_path']}")
     else:
         print(f"\n场景 {scene_name} 未更新任何文件")
     
@@ -579,7 +595,8 @@ def main():
                 print(f"\n处理结果: 成功")
                 print(f"共更新 {len(updated_files)} 个XML文件")
                 for file_info in updated_files:
-                    print(f"  - {os.path.basename(file_info['original_path'])} -> {os.path.basename(file_info['updated_path'])} (更新: {file_info['updated_count']}, 创建: {file_info['created_count']})")
+                    print(f"  - {os.path.basename(file_info['original_path'])} (更新: {file_info['updated_count']}, 创建: {file_info['created_count']})")
+                    print(f"    备份文件: {os.path.basename(file_info['backup_path'])}")
             else:
                 print(f"\n处理结果: 未找到需要更新的文件")
         except Exception as e:
