@@ -28,7 +28,7 @@ ALL_LIGHT_MAP_DATA = {
 
     "carcassonne" : {
         "source_lightmap_texture_path" : "C:/chaos_integrated_tools/data_analysis/scene/light/light_map",
-        "source_lightmap_json_path" : "C:/chaos_integrated_tools/data_analysis/scene/current_scene_data_source.json",
+        "source_lightmap_json_path" : "C:/chaos_integrated_tools/data_analysis/scene/current_scene_data.json",
         "source_scene_xml_folder_path" : "D:/test/scene",
         "lightmap_path_in_chaos_assets" : "_project/testSimpleLM/lightMaps",
         "source_terrain_xml_path" : "C:/Users/qingbo.tang/Desktop/ai/basic_level.terrain.ast",

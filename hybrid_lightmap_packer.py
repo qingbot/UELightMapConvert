@@ -655,8 +655,36 @@ def go_main(parser):
     texture_size = scene_data.get("lightmap_texture_size", 2048)
     min_texture_size = scene_data.get("lightmap_texture_min_size", 16)
     
+    # 创建JSON备份文件夹
+    json_dir = os.path.dirname(json_path)
+    backup_dir = os.path.join(json_dir, "backup")
+    os.makedirs(backup_dir, exist_ok=True)
+    
+    # 备份或从备份读取JSON
+    json_filename = os.path.basename(json_path)
+    backup_json_path = os.path.join(backup_dir, json_filename)
+    
+    if args.use_backup:
+        # 如果使用备份，检查备份是否存在
+        if os.path.exists(backup_json_path):
+            print(f"从备份读取JSON: {backup_json_path}")
+            source_json_path = backup_json_path
+        else:
+            print(f"警告: 备份文件不存在 {backup_json_path}，使用原始JSON")
+            source_json_path = json_path
+    else:
+        # 使用原始路径，并创建备份
+        source_json_path = json_path
+        try:
+            if os.path.exists(json_path):
+                print(f"备份JSON到: {backup_json_path}")
+                import shutil
+                shutil.copy2(json_path, backup_json_path)
+        except Exception as e:
+            print(f"备份JSON时出错: {e}")
+    
     print(f"场景: {args.scene}")
-    print(f"JSON路径: {json_path}")
+    print(f"JSON路径: {source_json_path}")
     print(f"灯光贴图路径: {lightmap_base_dir}")
     print(f"纹理大小: {texture_size}")
     print(f"最小纹理大小: {min_texture_size}")
@@ -665,9 +693,9 @@ def go_main(parser):
     output_dir = os.path.join("./output/lightmaps", args.scene)
     os.makedirs(output_dir, exist_ok=True)
     
-    # 获取新的JSON路径 - 与源JSON在相同位置
-    source_json_dir = os.path.dirname(json_path)
-    new_json_path = os.path.join(source_json_dir, get_new_json_path())
+    # 获取新的JSON路径 - 与源JSON在相同位置但不是备份文件夹
+    source_json_dir = os.path.dirname(json_path)  # 使用原始路径，不是备份路径
+    new_json_path = os.path.join(source_json_dir, json_filename)  # 直接覆盖原始文件
     
     # 处理地形lightmap（如果启用）
     if args.process_terrain:
@@ -685,7 +713,7 @@ def go_main(parser):
             try:
                 print("更新JSON中的地形数据...")
                 # 加载最新的JSON数据
-                with open(json_path, 'r', encoding='utf-8') as f:
+                with open(source_json_path, 'r', encoding='utf-8') as f:
                     terrain_json_data = json.load(f)
                 
                 # 检查JSON中是否有Landscape部分
@@ -742,7 +770,7 @@ def go_main(parser):
         
         # 步骤1: 加载JSON数据
         step1_start_time = time.time()
-        json_data = load_json_data(json_path)
+        json_data = load_json_data(source_json_path)  # 使用决定的源JSON路径
         step1_time = time.time() - step1_start_time
         print(f"步骤1: 加载JSON数据完成，耗时: {step1_time:.2f}秒")
         
@@ -881,8 +909,8 @@ def go_main(parser):
         # 更新JSON数据
         updated_json_data = update_json_data(json_data, updated_lightmap_info)
         
-        # 保存更新后的JSON
-        with open(new_json_path, 'w', encoding='utf-8') as f:
+        # 保存更新后的JSON，直接覆盖原始文件
+        with open(json_path, 'w', encoding='utf-8') as f:
             json.dump(updated_json_data, f, indent=4)
         
         step5_time = time.time() - step5_start_time
@@ -902,7 +930,7 @@ def go_main(parser):
         print(f"- 生成新贴图: {step4_time/total_time*100:.1f}%\t({step4_time:.2f}秒)")
         print(f"- 更新JSON数据: {step5_time/total_time*100:.1f}%\t({step5_time:.2f}秒)")
         
-        print(f"\n新的JSON文件已保存为: {new_json_path}")
+        print(f"\n新的JSON文件已保存到: {json_path}")
         print(f"新的光照图文件保存在: {bigmap_dir}")
         
     except Exception as e:
@@ -916,6 +944,8 @@ def main():
                         help="场景名称，默认为basic_level")
     parser.add_argument("--process-terrain", action="store_true",
                         help="同时处理地形的灯光贴图")
+    parser.add_argument("--use-backup", action="store_true",
+                        help="从备份文件夹读取JSON，而不是从原始位置读取")
 
     go_main(parser)
 
