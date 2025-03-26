@@ -10,3 +10,6 @@ GlobalParameter.py是打包程序所依赖的所有参数，以场景为单位�
 
 ReCode_Terrain_LQ.py将地形拼接为一个大图并重新归一化的程序
 
+auto_uv.py 是处理虚幻里面错误2uv资产的脚本，将StaticMesh的generate_lightmap_uv设置为false，然后再手动点击uvEditor上面的generate uv1
+
+clear_material_which_name_endwith_origin.py 功能和名字一样

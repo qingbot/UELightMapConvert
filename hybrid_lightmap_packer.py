@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 混合架构灯光贴图打包工具
+负责处理场景内的静态物体，地形由Caculate_Landscape_Lightmap.py处理
 
 Python负责:
 - 读取和解析JSON数据
@@ -30,6 +31,8 @@ import hashlib
 import struct
 from typing import Dict, List, Tuple, Any
 import GlobalParameter
+# 导入ReCode_Terrain_LQ中的地形处理函数
+import ReCode_Terrain_LQ
 # 从CPP目录导入C++ DLL包装类
 sys.path.append(os.path.join(os.path.dirname(__file__), "CPP"))
 
@@ -666,6 +669,74 @@ def go_main(parser):
     source_json_dir = os.path.dirname(json_path)
     new_json_path = os.path.join(source_json_dir, get_new_json_path())
     
+    # 处理地形lightmap（如果启用）
+    if args.process_terrain:
+        print("\n=== 开始处理地形 ===")
+        terrain_start_time = time.time()
+        
+        # 调用ReCode_Terrain_LQ中的地形处理函数，获取返回的处理结果
+        terrain_result = ReCode_Terrain_LQ.process_terrain_lightmap(args.scene)
+        
+        terrain_end_time = time.time()
+        if terrain_result:
+            print(f"地形处理完成，耗时: {terrain_end_time - terrain_start_time:.2f}秒")
+            
+            # 更新JSON中的地形数据
+            try:
+                print("更新JSON中的地形数据...")
+                # 加载最新的JSON数据
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    terrain_json_data = json.load(f)
+                
+                # 检查JSON中是否有Landscape部分
+                if 'Landscape' in terrain_json_data:
+                    landscape_data = terrain_json_data['Landscape']
+                    if 'Landscape' in landscape_data:
+                        landscape_data = landscape_data['Landscape']
+                        
+                        # 获取合并后的光照图名称和系数
+                        combine_name = terrain_result["combine_name"]
+                        lightmap_coef_scale = terrain_result["lightmap_coef_scale"]
+                        lightmap_coef_add = terrain_result["lightmap_coef_add"]
+                        direction_name = terrain_result["direction_name"]
+                        direction_coef_scale = terrain_result["direction_coef_scale"]
+                        direction_coef_add = terrain_result["direction_coef_add"]
+                        
+                        # 创建新的lightmapGroup，只保留一个项（0）
+                        new_lightmap_group = {
+                            'combine': combine_name,
+                            '0': {
+                                'LQ': combine_name,
+                                'Dir': direction_name,  # 添加方向图引用
+                                'BiasScale': [0, 0, 1, 1],  # 使用整个纹理
+                                'CoefScale': [1, 1, 1, 1, 1, 1, 1, 1] + lightmap_coef_scale + direction_coef_scale,
+                                'CoefAdd': [0, 0, 0, 0, 0, 0, 0, 0] + lightmap_coef_add + direction_coef_add
+                            }
+                        }
+                            
+                        # 更新JSON中的lightmapGroup
+                        landscape_data['lightmapGroup'] = new_lightmap_group
+                        print("已更新地形lightmapGroup，合并为单个项")
+                        print(f"使用光照图: {combine_name}")
+                        print(f"使用方向图: {direction_name}")
+                    else:
+                        print("警告: 在JSON中未找到嵌套的Landscape项")
+                else:
+                    print("警告: 在JSON中未找到Landscape项")
+                
+                # 保存更新后的JSON数据
+                with open(json_path, 'w', encoding='utf-8') as f:
+                    json.dump(terrain_json_data, f, indent=4)
+                print(f"已保存更新后的地形数据到: {json_path}")
+                
+            except Exception as e:
+                print(f"更新JSON中的地形数据时出错: {e}")
+                print(traceback.format_exc())
+        else:
+            print(f"地形处理失败，耗时: {terrain_end_time - terrain_start_time:.2f}秒")
+        
+        print("=== 地形处理结束 ===\n")
+    
     try:
         total_start_time = time.time()
         
@@ -843,8 +914,9 @@ def main():
     parser = argparse.ArgumentParser(description="混合架构灯光贴图打包工具")
     parser.add_argument("--scene", type=str, default=GlobalParameter.DEFAULT_LIGHT_MAP_SCENE_NAME,
                         help="场景名称，默认为basic_level")
+    parser.add_argument("--process-terrain", action="store_true",
+                        help="同时处理地形的灯光贴图")
 
-    parser.scene = "carcassonne"
     go_main(parser)
 
 if __name__ == "__main__":

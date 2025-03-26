@@ -4,16 +4,85 @@ from PIL import Image
 import time
 import numpy as np
 import traceback
+import argparse
+import sys
 
-global_path = "C:/chaos_integrated_tools/data_analysis/scene"
+# 移除全局路径，改为通过配置获取
+# global_path = "C:/chaos_integrated_tools/data_analysis/scene"
 SHRINK_PIXELS = 4   # 裁剪像素
 FINAL_TEXTURE_MAX_SIZE = 2048  # 最终纹理最大尺寸
 
+# 添加新的函数入口，用于被hybrid_lightmap_packer.py调用
+def process_terrain_lightmap(scene_name, log_callback=None):
+    """
+    处理场景地形的光照图，作为hybrid_lightmap_packer.py的函数入口
+    
+    Args:
+        scene_name: 场景名称，用于获取配置
+        log_callback: 可选的日志回调函数，用于输出日志信息
+    
+    Returns:
+        dict: 包含处理结果的字典，如果成功则包含贴图名称和系数值，失败则为None
+    """
+    try:
+        start_time = time.time()
+        
+        # 使用自定义日志函数或默认打印
+        log = log_callback if log_callback else print
+        
+        log(f"开始处理场景地形: {scene_name}")
+        
+        # 获取场景配置
+        scene_config = get_scene_config(scene_name)
+        
+        # 构建相关路径
+        json_path = scene_config["source_lightmap_json_path"]
+        lightmap_folder = scene_config["source_lightmap_texture_path"]
+        
+        # 确保light_map文件夹存在
+        if not os.path.exists(lightmap_folder):
+            os.makedirs(lightmap_folder)
+            log(f"创建文件夹: {lightmap_folder}")
+        
+        # 先处理texture json引用
+        landscape_data = process_texture_json(json_path)
+        log("成功处理texture json引用")
+        
+        # 处理lightmaps，现在返回贴图名称和系数
+        result = process_lightmaps(landscape_data, lightmap_folder, json_path)
+        
+        end_time = time.time()
+        log(f"地形处理完成，总耗时: {end_time - start_time:.2f}秒")
+        
+        return result
+    except Exception as e:
+        if log_callback:
+            log_callback(f"处理地形时出错: {str(e)}")
+            log_callback(traceback.format_exc())
+        else:
+            print(f"处理地形时出错: {str(e)}")
+            traceback.print_exc()
+        return None
+
+# 添加获取场景配置的函数
+def get_scene_config(scene_name):
+    """根据场景名称获取配置"""
+    # 导入全局配置
+    try:
+        import GlobalParameter
+        if scene_name not in GlobalParameter.ALL_LIGHT_MAP_DATA:
+            print(f"错误: 无法找到场景 '{scene_name}' 的配置")
+            print(f"可用的场景: {list(GlobalParameter.ALL_LIGHT_MAP_DATA.keys())}")
+            sys.exit(1)
+        
+        return GlobalParameter.ALL_LIGHT_MAP_DATA[scene_name]
+    except ImportError:
+        print("错误: 无法导入GlobalParameter模块")
+        sys.exit(1)
 
 def process_texture_json(json_path):
     """处理JSON文件, 将TextureJsonURL替换为其对应json文件的内容"""
     with open(json_path, 'r') as f:
-
         data = json.load(f)
     
     def process_dict(d):
@@ -85,8 +154,8 @@ def save_lightmap_data(json_path, lightmap_data, combine_name):
     with open(json_path, 'w') as f:
         json.dump(data, f, indent='\t')
 
-def read_tga(image_path):
-    """使用PIL读取TGA文件,确保输出RGBA格式"""
+def read_png(image_path):
+    """使用PIL读取PNG文件,确保输出RGBA格式"""
     try:
         img = Image.open(image_path)
         # 确保图像是RGBA格式
@@ -94,28 +163,28 @@ def read_tga(image_path):
             img = img.convert('RGBA')
         return img
     except Exception as e:
-        raise Exception(f"无法读取TGA文件: {image_path}, 错误: {str(e)}")
+        raise Exception(f"无法读取PNG文件: {image_path}, 错误: {str(e)}")
 
-def save_tga(image_path, pil_image):
-    """保存为TGA文件"""
+def save_png(image_path, pil_image):
+    """保存为PNG文件"""
     try:
-        pil_image.save(image_path, format='TGA')
+        pil_image.save(image_path, format='PNG')
     except Exception as e:
-        raise Exception(f"无法保存TGA文件: {image_path}, 错误: {str(e)}")
+        raise Exception(f"无法保存PNG文件: {image_path}, 错误: {str(e)}")
 
 def get_max_dimensions(lightmap_data, lightmap_folder):
     """获取贴图的宽度和高度,考虑bias和scale"""
     tile_data = lightmap_data['lightmapGroup']['0']
     lq_name = tile_data['LQ']
     bias_scale = tile_data['BiasScale']
-    image_path = os.path.join(lightmap_folder, f"{lq_name}.tga")  # 改为.tga
+    image_path = os.path.join(lightmap_folder, f"{lq_name}.png")  # 改为.png
     
     # 获取bias和scale值
     u_offset, v_offset = bias_scale[0], bias_scale[1] 
     u_scale, v_scale = bias_scale[2], bias_scale[3]
     
-    # 使用PIL读取TGA图像
-    img = read_tga(image_path)
+    # 使用PIL读取PNG图像
+    img = read_png(image_path)
     height, width = img.size
     
     # 计算实际需要的宽高
@@ -298,7 +367,7 @@ def process_lightmaps(landscape_data, lightmap_folder, json_path):
         bias_scale = tile_data['BiasScale']
         u_scale, v_scale = bias_scale[2], bias_scale[3]
         
-        source_path = os.path.join(lightmap_folder, f"{tile_data['LQ']}.tga")
+        source_path = os.path.join(lightmap_folder, f"{tile_data['LQ']}.png")
         with Image.open(source_path) as source_image:
             source_width, source_height = source_image.size
             actual_width = int(source_width * u_scale)
@@ -338,8 +407,8 @@ def process_lightmaps(landscape_data, lightmap_folder, json_path):
         coef_add_direction = tile_data['CoefAdd'][12:16]
 
         try:
-            source_path = os.path.join(lightmap_folder, f"{lq_name}.tga")
-            source_image = read_tga(source_path)
+            source_path = os.path.join(lightmap_folder, f"{lq_name}.png")
+            source_image = read_png(source_path)
             source_width, source_height = source_image.size
             
             u_offset, v_offset = bias_scale[0], bias_scale[1]
@@ -427,12 +496,12 @@ def process_lightmaps(landscape_data, lightmap_folder, json_path):
     
     # 保存最终图像
     output_name = f"{landscape_data['Name']}_combine_lightmap"
-    output_path = os.path.join(lightmap_folder, f"{output_name}.tga")
-    save_tga(output_path, final_image)
+    output_path = os.path.join(lightmap_folder, f"{output_name}.png")
+    save_png(output_path, final_image)
     
     output_name_direction = f"{landscape_data['Name']}_combine_direction"
-    output_path_direction = os.path.join(lightmap_folder, f"{output_name_direction}.tga")
-    save_tga(output_path_direction, final_image_direction)
+    output_path_direction = os.path.join(lightmap_folder, f"{output_name_direction}.png")
+    save_png(output_path_direction, final_image_direction)
     
     save_lightmap_data(json_path, landscape_data, output_name)
     
@@ -440,12 +509,35 @@ def process_lightmaps(landscape_data, lightmap_folder, json_path):
     print(f"已生成合并后的方向图: {output_path_direction}")
     total_end_time = time.time()
     print(f"程序总运行时间: {total_end_time - total_start_time:.2f}秒")
+    
+    # 返回处理结果，包括贴图名称和系数
+    result = {
+        "combine_name": output_name,
+        "lightmap_coef_scale": scale,
+        "lightmap_coef_add": add,
+        "direction_name": output_name_direction,
+        "direction_coef_scale": scale_direction,
+        "direction_coef_add": add_direction
+    }
+    
+    return result
+
 def main():
     start_time = time.time()  # 记录程序开始时间
     
+    # 解析命令行参数
+    parser = argparse.ArgumentParser(description='处理场景地形的光照图')
+    parser.add_argument('--scene', type=str, default="basic_level",
+                        help='要处理的场景名称，默认为basic_level')
+    args = parser.parse_args()
+    
+    # 获取场景配置
+    scene_config = get_scene_config(args.scene)
+    print(f"正在处理场景: {args.scene}")
+    
     # 构建相关路径
-    json_path = os.path.join(global_path, "current_scene_data.json")
-    lightmap_folder = os.path.join(global_path, "light", "light_map")
+    json_path = scene_config["source_lightmap_json_path"]
+    lightmap_folder = scene_config["source_lightmap_texture_path"]
     
     # 确保light_map文件夹存在
     if not os.path.exists(lightmap_folder):
