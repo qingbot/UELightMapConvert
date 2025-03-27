@@ -640,13 +640,14 @@ def process_and_save_packed_textures(results, group_rectangles, texture_size=409
     
     return updated_lightmap_info
 
-def process_terrain_lightmap(args, scene_data, json_data):
+def process_terrain_lightmap(args, scene_data, json_data, source_json_path):
     """处理地形的灯光贴图
     
     Args:
         args: 命令行参数
         scene_data: 场景配置数据
         json_data: 要更新的JSON数据
+        source_json_path: 用于处理的JSON文件路径
         
     Returns:
         (bool, dict): 处理结果(成功/失败)和更新后的JSON数据
@@ -654,8 +655,18 @@ def process_terrain_lightmap(args, scene_data, json_data):
     print("\n=== 开始处理地形 ===")
     terrain_start_time = time.time()
     
-    # 调用ReCode_Terrain_LQ中的地形处理函数，获取返回的处理结果
-    terrain_result = ReCode_Terrain_LQ.process_terrain_lightmap(args.scene)
+    # 获取灯光贴图文件夹路径
+    lightmap_base_dir = scene_data.get("source_lightmap_texture_path")
+    
+    print(f"使用JSON路径: {source_json_path}")
+    print(f"使用灯光贴图文件夹: {lightmap_base_dir}")
+    
+    # 调用ReCode_Terrain_LQ中的地形处理函数，传入正确的JSON路径和灯光贴图文件夹路径
+    terrain_result = ReCode_Terrain_LQ.process_terrain_lightmap(
+        args.scene, 
+        override_json_path=source_json_path,
+        override_lightmap_folder=lightmap_base_dir
+    )
     
     terrain_end_time = time.time()
     if terrain_result:
@@ -959,7 +970,7 @@ def go_main(parser):
     
     # 处理地形lightmap（如果启用）
     if args.process_terrain:
-        terrain_success, json_data = process_terrain_lightmap(args, scene_data, json_data)
+        terrain_success, json_data = process_terrain_lightmap(args, scene_data, json_data, source_json_path)
         modified = modified or terrain_success
     
     # 处理静态网格物体（如果启用）
@@ -977,7 +988,6 @@ def go_main(parser):
     if not args.process_terrain and not args.process_staticmesh:
         print("\n警告: 未指定任何处理选项。请使用 --process-terrain 处理地形或 --process-staticmesh 处理静态网格物体。")
 
-
 def main():
     parser = argparse.ArgumentParser(description="混合架构灯光贴图打包工具")
     parser.add_argument("--scene", type=str, default=GlobalParameter.DEFAULT_LIGHT_MAP_SCENE_NAME,
@@ -993,3 +1003,4 @@ def main():
 
 if __name__ == "__main__":
     main() 
+    

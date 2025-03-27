@@ -13,13 +13,15 @@ SHRINK_PIXELS = 4   # 裁剪像素
 FINAL_TEXTURE_MAX_SIZE = 2048  # 最终纹理最大尺寸
 
 # 添加新的函数入口，用于被hybrid_lightmap_packer.py调用
-def process_terrain_lightmap(scene_name, log_callback=None):
+def process_terrain_lightmap(scene_name, log_callback=None, override_json_path=None, override_lightmap_folder=None):
     """
     处理场景地形的光照图，作为hybrid_lightmap_packer.py的函数入口
     
     Args:
         scene_name: 场景名称，用于获取配置
         log_callback: 可选的日志回调函数，用于输出日志信息
+        override_json_path: 可选，指定JSON文件路径，覆盖配置中的路径
+        override_lightmap_folder: 可选，指定灯光贴图文件夹路径，覆盖配置中的路径
     
     Returns:
         dict: 包含处理结果的字典，如果成功则包含贴图名称和系数值，失败则为None
@@ -35,9 +37,17 @@ def process_terrain_lightmap(scene_name, log_callback=None):
         # 获取场景配置
         scene_config = get_scene_config(scene_name)
         
-        # 构建相关路径
-        json_path = scene_config["source_lightmap_json_path"]
-        lightmap_folder = scene_config["source_lightmap_texture_path"]
+        # 构建相关路径，优先使用指定的覆盖路径
+        json_path = override_json_path if override_json_path else scene_config["source_lightmap_json_path"]
+        lightmap_folder = override_lightmap_folder if override_lightmap_folder else scene_config["source_lightmap_texture_path"]
+        
+        log(f"使用JSON路径: {json_path}")
+        log(f"使用灯光贴图文件夹: {lightmap_folder}")
+        
+        # 检查JSON文件是否存在
+        if not os.path.exists(json_path):
+            log(f"错误: JSON文件不存在: {json_path}")
+            return None
         
         # 确保light_map文件夹存在
         if not os.path.exists(lightmap_folder):
@@ -315,6 +325,14 @@ def direct_sample(source_image, x1, y1, x2, y2, target_width, target_height, coe
     
     return processed_array
 
+def ensure_bigmap_dir(lightmap_folder):
+    """确保BigMap目录存在，返回完整路径"""
+    # 使用与hybrid_lightmap_packer.py相同的路径结构：在lightmap_folder的父目录下创建BigMap
+    bigmap_dir = os.path.join(os.path.dirname(lightmap_folder), "BigMap")
+    os.makedirs(bigmap_dir, exist_ok=True)
+    print(f"确保BigMap目录存在: {bigmap_dir}")
+    return bigmap_dir
+
 def save_landscape_json(lightmap_folder, landscape_data):
     """保存Landscape.json文件,包含所有的coef_scale和coef_add"""
     coef_data = []
@@ -339,8 +357,10 @@ def save_landscape_json(lightmap_folder, landscape_data):
     # 按网格索引排序
     coef_data.sort(key=lambda x: x['grid_index'])
     
+    # 确保BigMap目录存在
+    bigmap_dir = ensure_bigmap_dir(lightmap_folder)
     # 保存到json文件
-    landscape_json_path = os.path.join(lightmap_folder, 'Landscape.json')
+    landscape_json_path = os.path.join(bigmap_dir, 'Landscape.json')
     with open(landscape_json_path, 'w') as f:
         json.dump(coef_data, f, indent='\t')
     
@@ -494,13 +514,14 @@ def process_lightmaps(landscape_data, lightmap_folder, json_path):
     final_image_direction = final_image_direction.rotate(-90, expand=True)
     final_image_direction = final_image_direction.transpose(Image.FLIP_LEFT_RIGHT)
     
-    # 保存最终图像
+    # 创建BigMap目录并保存最终图像 - 修改为使用与静态物体相同的路径
+    bigmap_dir = ensure_bigmap_dir(lightmap_folder)
     output_name = f"{landscape_data['Name']}_combine_lightmap"
-    output_path = os.path.join(lightmap_folder, f"{output_name}.png")
+    output_path = os.path.join(bigmap_dir, f"{output_name}.png")
     save_png(output_path, final_image)
     
     output_name_direction = f"{landscape_data['Name']}_combine_direction"
-    output_path_direction = os.path.join(lightmap_folder, f"{output_name_direction}.png")
+    output_path_direction = os.path.join(bigmap_dir, f"{output_name_direction}.png")
     save_png(output_path_direction, final_image_direction)
     
     save_lightmap_data(json_path, landscape_data, output_name)

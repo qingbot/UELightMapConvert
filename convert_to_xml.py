@@ -531,6 +531,14 @@ def parse_arguments():
     parser.add_argument("--scene", "-s", type=str, default=CURRENT_LIGHT_MAP_SCENE_NAME,
                         help=f"指定要处理的场景名称，默认为{CURRENT_LIGHT_MAP_SCENE_NAME}")
     
+    # 添加处理类型参数
+    parser.add_argument("--process-staticmesh", action="store_true", default=False,
+                        help="处理StaticMesh的光照图")
+    parser.add_argument("--process-terrain", action="store_true", default=False,
+                        help="处理地形的光照图")
+    parser.add_argument("--process-all", action="store_true", default=False,
+                        help="处理所有类型的光照图（包括StaticMesh和地形）")
+    
     # 解析参数
     args = parser.parse_args()
     
@@ -540,9 +548,18 @@ def parse_arguments():
         print(f"可用的场景有: {', '.join(GlobalParameter.ALL_LIGHT_MAP_DATA.keys())}")
         sys.exit(1)
     
-    return args.scene
+    # 如果没有指定处理类型，默认处理StaticMesh
+    if not (args.process_staticmesh or args.process_terrain or args.process_all):
+        args.process_staticmesh = True
+    
+    # 如果指定了process_all，则同时处理StaticMesh和地形
+    if args.process_all:
+        args.process_staticmesh = True
+        args.process_terrain = True
+    
+    return args
 
-def process_scene(scene_name):
+def process_scene(scene_name, process_staticmesh=True, process_terrain=False):
     """处理单个场景"""
     global CURRENT_LIGHT_MAP_SCENE_NAME
     
@@ -557,37 +574,94 @@ def process_scene(scene_name):
     print(f"JSON数据文件: {scene_config['source_lightmap_json_path']}")
     print(f"Lightmap路径: {scene_config['lightmap_path_in_chaos_assets']}")
     
-    # 更新XML文件
-    updated_files = update_xml_with_json()
+    results = {
+        "staticmesh_updated": False,
+        "terrain_updated": False,
+        "staticmesh_files": [],
+        "terrain_file": None
+    }
     
-    if updated_files:
-        print(f"\n场景 {scene_name} 处理完成! 更新了 {len(updated_files)} 个XML文件:")
-        for file_info in updated_files:
-            print(f"  - {file_info['original_path']} (更新: {file_info['updated_count']}, 创建: {file_info['created_count']})")
-            print(f"    备份文件: {file_info['backup_path']}")
-    else:
-        print(f"\n场景 {scene_name} 未更新任何文件")
+    # 处理StaticMesh
+    if process_staticmesh:
+        print(f"\n== 开始处理StaticMesh光照图 ==")
+        try:
+            # 更新XML文件
+            updated_files = update_xml_with_json()
+            
+            if updated_files:
+                print(f"\nStaticMesh处理完成! 更新了 {len(updated_files)} 个XML文件:")
+                for file_info in updated_files:
+                    print(f"  - {file_info['original_path']} (更新: {file_info['updated_count']}, 创建: {file_info['created_count']})")
+                    print(f"    备份文件: {file_info['backup_path']}")
+                
+                results["staticmesh_updated"] = True
+                results["staticmesh_files"] = updated_files
+            else:
+                print(f"\nStaticMesh未更新任何文件")
+        except Exception as e:
+            print(f"处理StaticMesh失败: {str(e)}")
+            import traceback
+            traceback.print_exc()
     
-    return updated_files
+    # 处理地形
+    if process_terrain:
+        print(f"\n== 开始处理地形光照图 ==")
+        try:
+            # 检查地形XML文件是否存在
+            if "source_terrain_xml_path" not in scene_config or not scene_config["source_terrain_xml_path"]:
+                print(f"错误: 场景 {scene_name} 未配置地形XML文件路径")
+            elif not os.path.exists(scene_config["source_terrain_xml_path"]):
+                print(f"错误: 地形XML文件不存在: {scene_config['source_terrain_xml_path']}")
+            else:
+                # 直接从JSON文件中解析地形数据
+                json_path = scene_config["source_lightmap_json_path"]
+                if not os.path.exists(json_path):
+                    print(f"错误: JSON文件不存在: {json_path}")
+                else:
+                    # 更新地形XML文件
+                    if update_terrain_xml(json_path, scene_config):
+                        results["terrain_updated"] = True
+                        results["terrain_file"] = scene_config["source_terrain_xml_path"]
+                        print(f"\n地形光照图处理成功!")
+                    else:
+                        print(f"\n地形XML更新失败")
+        except Exception as e:
+            print(f"处理地形失败: {str(e)}")
+            import traceback
+            traceback.print_exc()
+    
+    return results
 
 def main():
     """主函数"""
     # 解析命令行参数
-    scene_name = parse_arguments()
+    args = parse_arguments()
+    scene_name = args.scene
     
     try:
         print(f"将处理场景: {scene_name}")
+        print(f"处理StaticMesh: {'是' if args.process_staticmesh else '否'}")
+        print(f"处理地形: {'是' if args.process_terrain else '否'}")
         
         try:
-            updated_files = process_scene(scene_name)
-            if updated_files:
-                print(f"\n处理结果: 成功")
-                print(f"共更新 {len(updated_files)} 个XML文件")
-                for file_info in updated_files:
-                    print(f"  - {os.path.basename(file_info['original_path'])} (更新: {file_info['updated_count']}, 创建: {file_info['created_count']})")
-                    print(f"    备份文件: {os.path.basename(file_info['backup_path'])}")
-            else:
-                print(f"\n处理结果: 未找到需要更新的文件")
+            results = process_scene(scene_name, args.process_staticmesh, args.process_terrain)
+            
+            print(f"\n=============== 处理结果汇总 ===============")
+            if args.process_staticmesh:
+                if results["staticmesh_updated"]:
+                    print(f"StaticMesh: 成功 (更新了 {len(results['staticmesh_files'])} 个文件)")
+                    for file_info in results["staticmesh_files"]:
+                        print(f"  - {os.path.basename(file_info['original_path'])} (更新: {file_info['updated_count']}, 创建: {file_info['created_count']})")
+                else:
+                    print(f"StaticMesh: 未找到需要更新的文件")
+            
+            if args.process_terrain:
+                if results["terrain_updated"]:
+                    print(f"地形: 成功 (更新了文件: {os.path.basename(results['terrain_file'])})")
+                else:
+                    print(f"地形: 未更新")
+            
+            print(f"===========================================")
         except Exception as e:
             print(f"\n处理结果: 失败")
             print(f"处理场景 {scene_name} 失败: {str(e)}")
@@ -645,6 +719,250 @@ def print_json_structure(data, max_depth=3, current_depth=0, path=""):
             print_json_structure(data[0], max_depth, current_depth + 1, f"{path}[0]")
             if len(data) > 1:
                 print(f"{' ' * (current_depth * 2)}... 等 {len(data)-1} 个元素")
+
+def extract_terrain_data_from_json(json_path):
+    """
+    从JSON文件中提取地形的Lightmap数据
+    
+    Args:
+        json_path: JSON文件路径
+    
+    Returns:
+        dict: 包含地形Lightmap数据的字典，如果找不到则返回None
+    """
+    try:
+        # 读取JSON文件
+        with open(json_path, 'r') as f:
+            json_data = json.load(f)
+        
+        print(f"正在从JSON文件提取地形数据: {json_path}")
+        
+        # 查找地形数据 - 首先尝试直接在根级别查找
+        if "Landscape" in json_data:
+            print("在根级别找到Landscape数据")
+            landscape_data = json_data["Landscape"]
+            
+            # 检查是否有嵌套的Landscape
+            if isinstance(landscape_data, dict) and "Landscape" in landscape_data:
+                landscape_data = landscape_data["Landscape"]
+                print("找到嵌套的Landscape数据")
+            
+            # 检查是否有lightmapGroup
+            if isinstance(landscape_data, dict) and "lightmapGroup" in landscape_data:
+                lightmap_group = landscape_data["lightmapGroup"]
+                
+                # 检查是否有combine字段，这是合并后的贴图名称
+                if "combine" in lightmap_group:
+                    combine_name = lightmap_group["combine"]
+                    print(f"找到地形合并的Lightmap: {combine_name}")
+                    
+                    # 查找所有网格的系数数据
+                    coef_scales = []
+                    coef_adds = []
+                    
+                    # 遍历所有网格，收集系数
+                    for key, tile_data in lightmap_group.items():
+                        if key == "combine":
+                            continue
+                        
+                        if isinstance(tile_data, dict):
+                            if "CoefScale" in tile_data and "CoefAdd" in tile_data:
+                                # 提取需要的系数数据
+                                coef_scale = tile_data.get("CoefScale", [])
+                                coef_add = tile_data.get("CoefAdd", [])
+                                
+                                # 确保我们有足够的数据
+                                if len(coef_scale) >= 12 and len(coef_add) >= 12:
+                                    # 通常系数在索引8-11位置
+                                    coef_scales.append(coef_scale[8:12])
+                                    coef_adds.append(coef_add[8:12])
+                    
+                    # 如果找到系数数据，计算平均值
+                    if coef_scales and coef_adds:
+                        # 计算平均系数
+                        avg_coef_scale = [sum(col)/len(col) for col in zip(*coef_scales)]
+                        avg_coef_add = [sum(col)/len(col) for col in zip(*coef_adds)]
+                        
+                        print(f"计算了 {len(coef_scales)} 个网格的平均系数")
+                        print(f"平均CoefScale: {avg_coef_scale}")
+                        print(f"平均CoefAdd: {avg_coef_add}")
+                        
+                        # 返回结果
+                        return {
+                            "combine_name": combine_name,
+                            "lightmap_coef_scale": avg_coef_scale,
+                            "lightmap_coef_add": avg_coef_add
+                        }
+                    else:
+                        print("未找到有效的系数数据")
+                else:
+                    print("未找到地形合并的Lightmap名称")
+            else:
+                print("未找到lightmapGroup数据")
+        else:
+            print("未在JSON中找到Landscape数据")
+            
+            # 如果在根级别找不到，尝试在'Terrain'字段中查找
+            if "Terrain" in json_data:
+                print("尝试在Terrain字段中查找数据")
+                terrain_data = json_data["Terrain"]
+                
+                # 查找合并的Lightmap信息
+                if isinstance(terrain_data, dict) and "lightmap" in terrain_data:
+                    lightmap_data = terrain_data["lightmap"]
+                    
+                    if "combine_name" in lightmap_data:
+                        combine_name = lightmap_data["combine_name"]
+                        print(f"找到地形合并的Lightmap: {combine_name}")
+                        
+                        # 查找系数数据
+                        if "coef_scale" in lightmap_data and "coef_add" in lightmap_data:
+                            coef_scale = lightmap_data["coef_scale"]
+                            coef_add = lightmap_data["coef_add"]
+                            
+                            return {
+                                "combine_name": combine_name,
+                                "lightmap_coef_scale": coef_scale,
+                                "lightmap_coef_add": coef_add
+                            }
+        
+        # 如果没有找到地形数据，打印JSON结构以帮助调试
+        print("未能找到有效的地形Lightmap数据，打印JSON结构:")
+        print_json_structure(json_data)
+        
+        return None
+    except Exception as e:
+        print(f"提取地形数据时出错: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+def update_terrain_xml(json_path, scene_config):
+    """
+    更新地形XML文件中的lightmap数据
+    
+    Args:
+        json_path: JSON文件路径，包含地形的Lightmap数据
+        scene_config: 场景配置信息
+    
+    Returns:
+        bool: 更新是否成功
+    """
+    xml_path = scene_config["source_terrain_xml_path"]
+    if not os.path.exists(xml_path):
+        print(f"错误: 地形XML文件不存在: {xml_path}")
+        return False
+    
+    # 获取lightmap资源路径
+    lightmap_path = scene_config["lightmap_path_in_chaos_assets"]
+    
+    # 从JSON中提取地形数据
+    terrain_result = extract_terrain_data_from_json(json_path)
+    if not terrain_result:
+        print(f"无法从JSON中提取地形Lightmap数据: {json_path}")
+        return False
+    
+    try:
+        # 解析XML文件
+        print(f"正在读取地形XML文件: {xml_path}")
+        tree = ET.parse(xml_path)
+        root = tree.getroot()
+        
+        # 查找terrain_lightmap_data元素
+        terrain_lightmap_data = root.find(".//terrain_lightmap_data")
+        if terrain_lightmap_data is None:
+            terrain_lightmap_data = root.find(".//ns:terrain_lightmap_data", XML_NS)
+        
+        if terrain_lightmap_data is None:
+            print(f"警告: 在XML文件中未找到terrain_lightmap_data元素")
+            return False
+        
+        # 备份原始XML用于调试
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.xml') as tmp:
+            debug_path = tmp.name
+            tree.write(debug_path)
+            print(f"已创建XML调试文件: {debug_path}")
+        
+        # 创建一个全新的terrain_lightmap_data元素
+        new_data = ET.Element("terrain_lightmap_data")
+        
+        # 创建CoefAdd元素
+        coef_add = ET.SubElement(new_data, "CoefAdd")
+        coef_add_value = " ".join([format_float(val) for val in terrain_result["lightmap_coef_add"]])
+        coef_add.text = coef_add_value
+        
+        # 创建CoefScale元素
+        coef_scale = ET.SubElement(new_data, "CoefScale")
+        coef_scale_value = " ".join([format_float(val) for val in terrain_result["lightmap_coef_scale"]])
+        coef_scale.text = coef_scale_value
+        
+        # 创建BiasScale元素
+        bias_scale = ET.SubElement(new_data, "BiasScale")
+        bias_scale.text = "0.000000 0.000000 1.000000 1.000000"
+        
+        # 创建terrainLightMap元素
+        terrain_light_map = ET.SubElement(new_data, "terrainLightMap")
+        
+        # 创建url元素
+        url = ET.SubElement(terrain_light_map, "url")
+        url.text = f"{lightmap_path}/{terrain_result['combine_name']}.texture.ast"
+        
+        # 创建guid和parameter元素
+        guid = ET.SubElement(terrain_light_map, "guid")
+        parameter = ET.SubElement(terrain_light_map, "parameter")
+        parameters = ET.SubElement(parameter, "parameters")
+        
+        # 找到terrain_lightmap_data的父元素
+        parent = None
+        for elem in root.iter():
+            for child in list(elem):
+                if child == terrain_lightmap_data:
+                    parent = elem
+                    break
+            if parent:
+                break
+        
+        if parent is None:
+            print("无法找到terrain_lightmap_data的父元素")
+            return False
+        
+        # 先移除旧的terrain_lightmap_data，然后添加新的
+        parent.remove(terrain_lightmap_data)
+        parent.append(new_data)
+        
+        # 创建backup目录
+        backup_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backup")
+        os.makedirs(backup_dir, exist_ok=True)
+        
+        # 创建以时间戳命名的子目录
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_subdir = os.path.join(backup_dir, timestamp)
+        os.makedirs(backup_subdir, exist_ok=True)
+        
+        # 使用原始文件名创建备份文件
+        xml_filename = os.path.basename(xml_path)
+        backup_path = os.path.join(backup_subdir, xml_filename)
+        
+        # 复制原文件作为备份
+        import shutil
+        shutil.copy2(xml_path, backup_path)
+        print(f"已创建备份文件: {backup_path}")
+        
+        # 保存修改后的XML
+        save_xml_with_original_tags(tree, xml_path, xml_path)
+        print(f"已更新地形XML文件: {xml_path}")
+        print(f"Lightmap URL: {f'{lightmap_path}/{terrain_result['combine_name']}.texture.ast'}")
+        print(f"CoefAdd: {coef_add_value}")
+        print(f"CoefScale: {coef_scale_value}")
+        print(f"BiasScale: 0.000000 0.000000 1.000000 1.000000")
+        
+        return True
+    except Exception as e:
+        print(f"更新地形XML文件时出错: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return False
 
 if __name__ == "__main__":
     main() 
