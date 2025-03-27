@@ -12,13 +12,6 @@ from datetime import datetime
 # 当前的场景名称, 由用户输入
 CURRENT_LIGHT_MAP_SCENE_NAME = GlobalParameter.DEFAULT_LIGHT_MAP_SCENE_NAME
 
-# 为了测试方便，如果文件不存在，可以使用以下临时测试文件
-TEST_JSON_PATH = "test_scene_data.json"
-TEST_XML_PATH = "test_scene.xml"
-
-# 是否使用测试文件
-USE_TEST_FILES = False  # 使用真实数据文件
-
 # 注册命名空间
 ET.register_namespace('', "http://www.boominggames.com")
 # XML命名空间
@@ -246,7 +239,7 @@ def update_xml_with_json(xml_path=None):
     scene_config = GlobalParameter.ALL_LIGHT_MAP_DATA[CURRENT_LIGHT_MAP_SCENE_NAME]
     
     # 选择正确的文件路径
-    json_path = TEST_JSON_PATH if USE_TEST_FILES else scene_config["source_lightmap_json_path"]
+    json_path = scene_config["source_lightmap_json_path"]
     
     # xml_path参数为空时，从配置获取XML文件夹路径
     xml_folder_path = scene_config["source_scene_xml_folder_path"] if xml_path is None else os.path.dirname(xml_path)
@@ -256,11 +249,7 @@ def update_xml_with_json(xml_path=None):
     
     # 如果源文件不存在,尝试使用测试文件
     if not os.path.exists(json_path):
-        print(f"警告: 源JSON文件 {json_path} 不存在,尝试使用测试文件 {TEST_JSON_PATH}")
-        if os.path.exists(TEST_JSON_PATH):
-            json_path = TEST_JSON_PATH
-        else:
-            raise FileNotFoundError(f"无法找到JSON文件: {json_path} 或 {TEST_JSON_PATH}")
+        raise FileNotFoundError(f"无法找到JSON文件: {json_path}")
     
     if single_file_mode and not os.path.exists(xml_path):
         print(f"警告: 源XML文件 {xml_path} 不存在")
@@ -609,26 +598,6 @@ def main():
         print(f"处理失败: {str(e)}")
         import traceback
         traceback.print_exc()
-
-def process_image(image_path, target_directory=None):
-    """处理图像文件"""
-    # 如果未提供目标目录,使用当前场景配置的Lightmap路径
-    if target_directory is None:
-        target_directory = GlobalParameter.ALL_LIGHT_MAP_DATA[CURRENT_LIGHT_MAP_SCENE_NAME]["lightmap_absolute_path"]
-    
-    # 修改图像路径后缀为.bmp
-    image_path = image_path.replace('.png', '.bmp')
-    image_path = image_path.replace('.tga', '.bmp')
-    
-    # 使用PIL读取BMP图像
-    try:
-        with Image.open(image_path) as img:
-            width, height = img.size
-            return width, height
-    except Exception as e:
-        print(f"处理图像文件出错: {image_path}")
-        print(f"错误信息: {str(e)}")
-        return None, None
 
 def print_json_structure(data, max_depth=3, current_depth=0, path=""):
     """

@@ -352,7 +352,7 @@ public:
             return true;
         }
         vector<Diagonal> diagonals = lightMapTexture->diagonals;
-        // 算法的示例如下
+        // 算法的示例如下 
         // 0  0  0  0
         // 0  0  0  0
         // 0  0  0  0
@@ -392,22 +392,11 @@ public:
                 Diagonal &diagonal = diagonals.back();
 
                 RectangleForPacking rectangle_for_packing;
-                // 先尝试横着放
+                // 先尝试横着放，如果横着放不下，再尝试竖着放
                 if (RectangleForPacking::try_get_place(single_texture->rectangle_width, single_texture->rectangle_height,
-                                                       diagonal.rectangles_row, rectangle_for_packing))
-                {
-                    // 找到了一个位置
-                    diagonal.rectangles.push_back(SingleResultLightMapRectangle(
-                        rectangle_for_packing.position_x,
-                        rectangle_for_packing.position_y,
-                        rectangle_for_packing.width,
-                        rectangle_for_packing.height,
-                        single_texture->rectangles_id[i],
-                        single_texture));
-                }
-                // 再尝试竖着放
-                else if (RectangleForPacking::try_get_place(single_texture->rectangle_height, single_texture->rectangle_width,
-                                                            diagonal.rectangles_column, rectangle_for_packing))
+                                                       diagonal.rectangles_row, rectangle_for_packing) ||
+                    RectangleForPacking::try_get_place(single_texture->rectangle_height, single_texture->rectangle_width,
+                                                       diagonal.rectangles_column, rectangle_for_packing))
                 {
                     // 找到了一个位置
                     diagonal.rectangles.push_back(SingleResultLightMapRectangle(

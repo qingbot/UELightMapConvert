@@ -640,139 +640,103 @@ def process_and_save_packed_textures(results, group_rectangles, texture_size=409
     
     return updated_lightmap_info
 
-def go_main(parser):
-    args = parser.parse_args()
+def process_terrain_lightmap(args, scene_data, json_data):
+    """处理地形的灯光贴图
     
-    # 从GlobalParameter获取场景相关参数
-    scene_data = GlobalParameter.ALL_LIGHT_MAP_DATA.get(args.scene, {})
-    if not scene_data:
-        print(f"错误: 找不到场景 '{args.scene}' 的配置数据")
-        return
+    Args:
+        args: 命令行参数
+        scene_data: 场景配置数据
+        json_data: 要更新的JSON数据
+        
+    Returns:
+        (bool, dict): 处理结果(成功/失败)和更新后的JSON数据
+    """
+    print("\n=== 开始处理地形 ===")
+    terrain_start_time = time.time()
     
-    # 获取各项参数
-    json_path = scene_data.get("source_lightmap_json_path")
-    lightmap_base_dir = scene_data.get("source_lightmap_texture_path")
-    texture_size = scene_data.get("lightmap_texture_size", 2048)
-    min_texture_size = scene_data.get("lightmap_texture_min_size", 16)
+    # 调用ReCode_Terrain_LQ中的地形处理函数，获取返回的处理结果
+    terrain_result = ReCode_Terrain_LQ.process_terrain_lightmap(args.scene)
     
-    # 创建JSON备份文件夹
-    json_dir = os.path.dirname(json_path)
-    backup_dir = os.path.join(json_dir, "backup")
-    os.makedirs(backup_dir, exist_ok=True)
-    
-    # 备份或从备份读取JSON
-    json_filename = os.path.basename(json_path)
-    backup_json_path = os.path.join(backup_dir, json_filename)
-    
-    if args.use_backup:
-        # 如果使用备份，检查备份是否存在
-        if os.path.exists(backup_json_path):
-            print(f"从备份读取JSON: {backup_json_path}")
-            source_json_path = backup_json_path
-        else:
-            print(f"警告: 备份文件不存在 {backup_json_path}，使用原始JSON")
-            source_json_path = json_path
-    else:
-        # 使用原始路径，并创建备份
-        source_json_path = json_path
+    terrain_end_time = time.time()
+    if terrain_result:
+        print(f"地形处理完成，耗时: {terrain_end_time - terrain_start_time:.2f}秒")
+        
+        # 更新JSON中的地形数据
         try:
-            if os.path.exists(json_path):
-                print(f"备份JSON到: {backup_json_path}")
-                import shutil
-                shutil.copy2(json_path, backup_json_path)
-        except Exception as e:
-            print(f"备份JSON时出错: {e}")
-    
-    print(f"场景: {args.scene}")
-    print(f"JSON路径: {source_json_path}")
-    print(f"灯光贴图路径: {lightmap_base_dir}")
-    print(f"纹理大小: {texture_size}")
-    print(f"最小纹理大小: {min_texture_size}")
-    
-    # 设置输出路径
-    output_dir = os.path.join("./output/lightmaps", args.scene)
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # 获取新的JSON路径 - 与源JSON在相同位置但不是备份文件夹
-    source_json_dir = os.path.dirname(json_path)  # 使用原始路径，不是备份路径
-    new_json_path = os.path.join(source_json_dir, json_filename)  # 直接覆盖原始文件
-    
-    # 处理地形lightmap（如果启用）
-    if args.process_terrain:
-        print("\n=== 开始处理地形 ===")
-        terrain_start_time = time.time()
-        
-        # 调用ReCode_Terrain_LQ中的地形处理函数，获取返回的处理结果
-        terrain_result = ReCode_Terrain_LQ.process_terrain_lightmap(args.scene)
-        
-        terrain_end_time = time.time()
-        if terrain_result:
-            print(f"地形处理完成，耗时: {terrain_end_time - terrain_start_time:.2f}秒")
+            print("更新JSON中的地形数据...")
             
-            # 更新JSON中的地形数据
-            try:
-                print("更新JSON中的地形数据...")
-                # 加载最新的JSON数据
-                with open(source_json_path, 'r', encoding='utf-8') as f:
-                    terrain_json_data = json.load(f)
-                
-                # 检查JSON中是否有Landscape部分
-                if 'Landscape' in terrain_json_data:
-                    landscape_data = terrain_json_data['Landscape']
-                    if 'Landscape' in landscape_data:
-                        landscape_data = landscape_data['Landscape']
-                        
-                        # 获取合并后的光照图名称和系数
-                        combine_name = terrain_result["combine_name"]
-                        lightmap_coef_scale = terrain_result["lightmap_coef_scale"]
-                        lightmap_coef_add = terrain_result["lightmap_coef_add"]
-                        direction_name = terrain_result["direction_name"]
-                        direction_coef_scale = terrain_result["direction_coef_scale"]
-                        direction_coef_add = terrain_result["direction_coef_add"]
-                        
-                        # 创建新的lightmapGroup，只保留一个项（0）
-                        new_lightmap_group = {
-                            'combine': combine_name,
-                            '0': {
-                                'LQ': combine_name,
-                                'Dir': direction_name,  # 添加方向图引用
-                                'BiasScale': [0, 0, 1, 1],  # 使用整个纹理
-                                'CoefScale': [1, 1, 1, 1, 1, 1, 1, 1] + lightmap_coef_scale + direction_coef_scale,
-                                'CoefAdd': [0, 0, 0, 0, 0, 0, 0, 0] + lightmap_coef_add + direction_coef_add
-                            }
+            # 检查JSON中是否有Landscape部分
+            if 'Landscape' in json_data:
+                landscape_data = json_data['Landscape']
+                if 'Landscape' in landscape_data:
+                    landscape_data = landscape_data['Landscape']
+                    
+                    # 获取合并后的光照图名称和系数
+                    combine_name = terrain_result["combine_name"]
+                    lightmap_coef_scale = terrain_result["lightmap_coef_scale"]
+                    lightmap_coef_add = terrain_result["lightmap_coef_add"]
+                    direction_name = terrain_result["direction_name"]
+                    direction_coef_scale = terrain_result["direction_coef_scale"]
+                    direction_coef_add = terrain_result["direction_coef_add"]
+                    
+                    # 创建新的lightmapGroup，只保留一个项（0）
+                    new_lightmap_group = {
+                        'combine': combine_name,
+                        '0': {
+                            'LQ': combine_name,
+                            'Dir': direction_name,  # 添加方向图引用
+                            'BiasScale': [0, 0, 1, 1],  # 使用整个纹理
+                            'CoefScale': [1, 1, 1, 1, 1, 1, 1, 1] + lightmap_coef_scale + direction_coef_scale,
+                            'CoefAdd': [0, 0, 0, 0, 0, 0, 0, 0] + lightmap_coef_add + direction_coef_add
                         }
-                            
-                        # 更新JSON中的lightmapGroup
-                        landscape_data['lightmapGroup'] = new_lightmap_group
-                        print("已更新地形lightmapGroup，合并为单个项")
-                        print(f"使用光照图: {combine_name}")
-                        print(f"使用方向图: {direction_name}")
-                    else:
-                        print("警告: 在JSON中未找到嵌套的Landscape项")
+                    }
+                        
+                    # 更新JSON中的lightmapGroup
+                    landscape_data['lightmapGroup'] = new_lightmap_group
+                    print("已更新地形lightmapGroup，合并为单个项")
+                    print(f"使用光照图: {combine_name}")
+                    print(f"使用方向图: {direction_name}")
                 else:
-                    print("警告: 在JSON中未找到Landscape项")
-                
-                # 保存更新后的JSON数据
-                with open(json_path, 'w', encoding='utf-8') as f:
-                    json.dump(terrain_json_data, f, indent=4)
-                print(f"已保存更新后的地形数据到: {json_path}")
-                
-            except Exception as e:
-                print(f"更新JSON中的地形数据时出错: {e}")
-                print(traceback.format_exc())
-        else:
-            print(f"地形处理失败，耗时: {terrain_end_time - terrain_start_time:.2f}秒")
-        
-        print("=== 地形处理结束 ===\n")
+                    print("警告: 在JSON中未找到嵌套的Landscape项")
+            else:
+                print("警告: 在JSON中未找到Landscape项")
+            
+        except Exception as e:
+            print(f"更新JSON中的地形数据时出错: {e}")
+            print(traceback.format_exc())
+            return False, json_data
+    else:
+        print(f"地形处理失败，耗时: {terrain_end_time - terrain_start_time:.2f}秒")
+        return False, json_data
     
+    print("=== 地形处理结束 ===\n")
+    
+    return True, json_data
+
+
+def process_staticmesh_lightmap(args, scene_data, json_data, output_dir):
+    """处理静态网格物体的灯光贴图
+    
+    Args:
+        args: 命令行参数
+        scene_data: 场景配置数据 
+        json_data: 要更新的JSON数据
+        output_dir: 输出目录
+        
+    Returns:
+        (bool, dict): 处理结果(成功/失败)和更新后的JSON数据
+    """
     try:
+        lightmap_base_dir = scene_data.get("source_lightmap_texture_path")
+        texture_size = scene_data.get("lightmap_texture_size", 2048)
+        min_texture_size = scene_data.get("lightmap_texture_min_size", 16)
+        
         total_start_time = time.time()
         
-        # 步骤1: 加载JSON数据
+        # 步骤1: 使用传入的JSON数据
         step1_start_time = time.time()
-        json_data = load_json_data(source_json_path)  # 使用决定的源JSON路径
         step1_time = time.time() - step1_start_time
-        print(f"步骤1: 加载JSON数据完成，耗时: {step1_time:.2f}秒")
+        print(f"步骤1: 准备JSON数据完成，耗时: {step1_time:.2f}秒")
         
         # 步骤2: 按组整理数据
         step2_start_time = time.time()
@@ -783,7 +747,7 @@ def go_main(parser):
         
         if len(groups) == 0:
             print("警告: 未找到有效的分组数据，请检查JSON格式")
-            return
+            return False, json_data
         
         # 步骤2.5: 计算每个物体实际需要的lightmap大小
         # 遍历每个组，计算实际的lightmap大小
@@ -850,7 +814,7 @@ def go_main(parser):
             print("成功加载LightmapPacker DLL")
         except Exception as e:
             print(f"加载LightmapPacker DLL失败: {e}")
-            return
+            return False, json_data
         
         packer.set_log_callback(default_log_callback)
         
@@ -872,7 +836,7 @@ def go_main(parser):
         
         if not packer.pack_lightmaps():
             print("贴图打包失败")
-            return
+            return False, json_data
         
         results = packer.get_all_texture_results()
         print(f"获取到 {len(results)} 个打包结果")
@@ -906,36 +870,112 @@ def go_main(parser):
         # 步骤5: 更新JSON数据
         step5_start_time = time.time()
         
-        # 更新JSON数据
+        # 更新JSON数据 - 直接在传入的json_data上更新
         updated_json_data = update_json_data(json_data, updated_lightmap_info)
-        
-        # 保存更新后的JSON，直接覆盖原始文件
-        with open(json_path, 'w', encoding='utf-8') as f:
-            json.dump(updated_json_data, f, indent=4)
         
         step5_time = time.time() - step5_start_time
         print(f"步骤5: 更新JSON数据完成，耗时: {step5_time:.2f}秒")
         
         # 总结
         total_time = time.time() - total_start_time
-        print("\n=== 处理完成 ===")
+        print("\n=== 处理静态网格物体完成 ===")
         print(f"总共处理了 {len(results)} 个对象")
         print(f"总耗时: {total_time:.2f}秒")
         
         # 显示每个步骤占用的时间百分比
         print("\n时间分布:")
-        print(f"- 加载JSON数据: {step1_time/total_time*100:.1f}%\t({step1_time:.2f}秒)")
+        print(f"- 准备JSON数据: {step1_time/total_time*100:.1f}%\t({step1_time:.2f}秒)")
         print(f"- 按组整理数据: {step2_time/total_time*100:.1f}%\t({step2_time:.2f}秒)")
         print(f"- 执行贴图打包: {step3_time/total_time*100:.1f}%\t({step3_time:.2f}秒)")
         print(f"- 生成新贴图: {step4_time/total_time*100:.1f}%\t({step4_time:.2f}秒)")
         print(f"- 更新JSON数据: {step5_time/total_time*100:.1f}%\t({step5_time:.2f}秒)")
         
-        print(f"\n新的JSON文件已保存到: {json_path}")
         print(f"新的光照图文件保存在: {bigmap_dir}")
         
+        return True, updated_json_data
+        
     except Exception as e:
-        print(f"处理过程中出错: {e}")
+        print(f"处理静态网格物体时出错: {e}")
         print(traceback.format_exc())
+        return False, json_data
+
+
+def go_main(parser):
+    args = parser.parse_args()
+    
+    # 从GlobalParameter获取场景相关参数
+    scene_data = GlobalParameter.ALL_LIGHT_MAP_DATA.get(args.scene, {})
+    if not scene_data:
+        print(f"错误: 找不到场景 '{args.scene}' 的配置数据")
+        return
+    
+    # 获取各项参数
+    json_path = scene_data.get("source_lightmap_json_path")
+    lightmap_base_dir = scene_data.get("source_lightmap_texture_path")
+    texture_size = scene_data.get("lightmap_texture_size", 2048)
+    min_texture_size = scene_data.get("lightmap_texture_min_size", 16)
+    
+    # 创建JSON备份文件夹
+    json_dir = os.path.dirname(json_path)
+    backup_dir = os.path.join(json_dir, "backup")
+    os.makedirs(backup_dir, exist_ok=True)
+    
+    # 备份或从备份读取JSON
+    json_filename = os.path.basename(json_path)
+    backup_json_path = os.path.join(backup_dir, json_filename)
+    
+    if args.use_backup:
+        # 如果使用备份，检查备份是否存在
+        if os.path.exists(backup_json_path):
+            print(f"从备份读取JSON: {backup_json_path}")
+            source_json_path = backup_json_path
+        else:
+            print(f"警告: 备份文件不存在 {backup_json_path}，使用原始JSON")
+            source_json_path = json_path
+    else:
+        # 使用原始路径，并创建备份
+        source_json_path = json_path
+        try:
+            if os.path.exists(json_path):
+                print(f"备份JSON到: {backup_json_path}")
+                import shutil
+                shutil.copy2(json_path, backup_json_path)
+        except Exception as e:
+            print(f"备份JSON时出错: {e}")
+    
+    print(f"场景: {args.scene}")
+    print(f"JSON路径: {source_json_path}")
+    print(f"灯光贴图路径: {lightmap_base_dir}")
+    print(f"纹理大小: {texture_size}")
+    print(f"最小纹理大小: {min_texture_size}")
+    
+    # 设置输出路径
+    output_dir = os.path.join("./output/lightmaps", args.scene)
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # 加载初始JSON数据
+    json_data = load_json_data(source_json_path)
+    modified = False
+    
+    # 处理地形lightmap（如果启用）
+    if args.process_terrain:
+        terrain_success, json_data = process_terrain_lightmap(args, scene_data, json_data)
+        modified = modified or terrain_success
+    
+    # 处理静态网格物体（如果启用）
+    if args.process_staticmesh:
+        staticmesh_success, json_data = process_staticmesh_lightmap(args, scene_data, json_data, output_dir)
+        modified = modified or staticmesh_success
+
+    # 如果有任何更改，保存JSON
+    if modified:
+        print(f"\n保存最终的JSON文件到: {json_path}")
+        with open(json_path, 'w', encoding='utf-8') as f:
+            json.dump(json_data, f, indent=4)
+    
+    # 如果没有选择任何处理选项，显示提示信息
+    if not args.process_terrain and not args.process_staticmesh:
+        print("\n警告: 未指定任何处理选项。请使用 --process-terrain 处理地形或 --process-staticmesh 处理静态网格物体。")
 
 
 def main():
@@ -943,7 +983,9 @@ def main():
     parser.add_argument("--scene", type=str, default=GlobalParameter.DEFAULT_LIGHT_MAP_SCENE_NAME,
                         help="场景名称，默认为basic_level")
     parser.add_argument("--process-terrain", action="store_true",
-                        help="同时处理地形的灯光贴图")
+                        help="处理地形的灯光贴图")
+    parser.add_argument("--process-staticmesh", action="store_true",
+                        help="处理场景中静态网格物体的灯光贴图")
     parser.add_argument("--use-backup", action="store_true",
                         help="从备份文件夹读取JSON，而不是从原始位置读取")
 
