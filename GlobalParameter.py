@@ -31,7 +31,7 @@ ALL_LIGHT_MAP_DATA = {
         "source_lightmap_json_path" : "C:/chaos_integrated_tools/data_analysis/scene/current_scene_data.json",
         "source_scene_xml_folder_path" : "D:/test/scene",
         "lightmap_path_in_chaos_assets" : "_project/testSimpleLM/lightMaps",
-        "source_terrain_xml_path" : "C:/Users/qingbo.tang/Desktop/ai/basic_level.terrain.ast",
+        "source_terrain_xml_path" : "D:/ev/dev/chaos/_content/levels/_test/basic_level/basic_level.terrain.ast",
         "terrain_size_offset" : [1024,1024,512,512],
         "lightmap_texture_size" : 2048,
 

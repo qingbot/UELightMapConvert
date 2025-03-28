@@ -913,12 +913,14 @@ def update_terrain_xml(json_path, scene_config):
         parameter = ET.SubElement(terrain_light_map, "parameter")
         parameters = ET.SubElement(parameter, "parameters")
         
-        # 找到terrain_lightmap_data的父元素
+        # 找到terrain_lightmap_data的父元素和索引位置
         parent = None
+        index = -1
         for elem in root.iter():
-            for child in list(elem):
+            for i, child in enumerate(list(elem)):
                 if child == terrain_lightmap_data:
                     parent = elem
+                    index = i
                     break
             if parent:
                 break
@@ -926,10 +928,16 @@ def update_terrain_xml(json_path, scene_config):
         if parent is None:
             print("无法找到terrain_lightmap_data的父元素")
             return False
+            
+        # 确保我们替换的元素保持在原来的位置，以维持与其他元素的相对位置关系
+        # 直接替换而不是删除后添加，这样可以保持原来的顺序
+        parent[index] = new_data
         
-        # 先移除旧的terrain_lightmap_data，然后添加新的
-        parent.remove(terrain_lightmap_data)
-        parent.append(new_data)
+        # 调试信息
+        print(f"已替换地形XML中的terrain_lightmap_data元素在索引 {index}")
+        # 打印父元素的所有子元素名称，确认顺序
+        child_elements = [child.tag for child in parent]
+        print(f"父元素的子元素顺序: {child_elements}")
         
         # 创建backup目录
         backup_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "backup")
