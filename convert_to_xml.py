@@ -897,9 +897,33 @@ def update_terrain_xml(json_path, scene_config):
         coef_scale_value = " ".join([format_float(val) for val in terrain_result["lightmap_coef_scale"]])
         coef_scale.text = coef_scale_value
         
+        # 计算BiasScale值，使用terrain_size_offset参数
+        if "terrain_size_offset" in scene_config:
+            terrain_size_offset = scene_config["terrain_size_offset"]
+            if len(terrain_size_offset) >= 4:
+                size_x, size_y, offset_x, offset_y = terrain_size_offset
+                
+                # 计算scale和bias
+                # scale = 1 / size
+                scale_u = 1.0 / size_x if size_x != 0 else 0.0
+                scale_v = 1.0 / size_y if size_y != 0 else 0.0
+                
+                # bias = offset / size (确保uv计算时能正确映射到[0,1]区间)
+                bias_u = offset_x / size_x if size_x != 0 else 0.0
+                bias_v = offset_y / size_y if size_y != 0 else 0.0
+                
+                bias_scale_text = f"{format_float(bias_u)} {format_float(bias_v)} {format_float(scale_u)} {format_float(scale_v)}"
+                print(f"使用配置的terrain_size_offset [{size_x}, {size_y}, {offset_x}, {offset_y}] 计算BiasScale: {bias_scale_text}")
+            else:
+                print(f"警告: terrain_size_offset数组长度不足 ({len(terrain_size_offset)}), 使用默认BiasScale值")
+                bias_scale_text = "0.000000 0.000000 1.000000 1.000000"
+        else:
+            print(f"警告: 未找到terrain_size_offset配置, 使用默认BiasScale值")
+            bias_scale_text = "0.000000 0.000000 1.000000 1.000000"
+        
         # 创建BiasScale元素
         bias_scale = ET.SubElement(new_data, "BiasScale")
-        bias_scale.text = "0.000000 0.000000 1.000000 1.000000"
+        bias_scale.text = bias_scale_text
         
         # 创建terrainLightMap元素
         terrain_light_map = ET.SubElement(new_data, "terrainLightMap")
@@ -963,7 +987,7 @@ def update_terrain_xml(json_path, scene_config):
         print(f"Lightmap URL: {f'{lightmap_path}/{terrain_result['combine_name']}.texture.ast'}")
         print(f"CoefAdd: {coef_add_value}")
         print(f"CoefScale: {coef_scale_value}")
-        print(f"BiasScale: 0.000000 0.000000 1.000000 1.000000")
+        print(f"BiasScale: {bias_scale_text}")
         
         return True
     except Exception as e:

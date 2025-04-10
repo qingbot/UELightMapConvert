@@ -630,7 +630,6 @@ public:
                 index++;
             }
         }
-
         return true;
     }
 
@@ -644,7 +643,6 @@ public:
 
     bool CaculateMaxGroupScale()
     {
-
         for (int i = 0; i < lightMapInstanceGroups.size(); i++)
         {
             LightMapInstanceGroup &current_group = lightMapInstanceGroups[i];

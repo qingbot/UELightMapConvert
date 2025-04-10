@@ -11,7 +11,7 @@ ALL_LIGHT_MAP_DATA = {
         "lightmap_path_in_chaos_assets" : "_project/New Folder1/lightMaps",
         # 地形的Chaos的XML文件
         "source_terrain_xml_path" : "C:/Users/qingbo.tang/Desktop/ai/basic_level.terrain.ast",
-        # 地形的大小偏移，用以在runtime时，从世界坐标计算lightmap的uv坐标  uv = (world_pos + offset) / size ; 0<uv<1
+        # 地形的大小偏移，用以在runtime时，从世界坐标计算lightmap的uv坐标  uv = (world_pos + offset) / size; 注意offset的正负号使得uv: 0<uv<1
         "terrain_size_offset" : [512,512,512,512],
         # 合并为一张大纹理时，该纹理的大小
         "lightmap_texture_size" : 2048,
@@ -32,7 +32,7 @@ ALL_LIGHT_MAP_DATA = {
         "source_scene_xml_folder_path" : "D:/test/scene",
         "lightmap_path_in_chaos_assets" : "_project/testSimpleLM/lightMaps",
         "source_terrain_xml_path" : "D:/ev/dev/chaos/_content/levels/_test/basic_level/basic_level.terrain.ast",
-        "terrain_size_offset" : [1024,1024,512,512],
+        "terrain_size_offset" : [2048,2048,1024,1024],
         "lightmap_texture_size" : 2048,
 
         "lightmap_absolute_path" : "D:/ev/dev/wolfgang/_games/proven_ground/_content/New Folder1/lightMaps",
