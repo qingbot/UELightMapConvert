@@ -25,7 +25,6 @@ ALL_LIGHT_MAP_DATA = {
         "original_lightmap_absolute_path" : "C:/chaos_integrated_tools/data_analysis/scene/light/light_map/BigLightmap"
     },
 
-
     "carcassonne" : {
         "source_lightmap_texture_path" : "C:/chaos_integrated_tools/data_analysis/scene/light/light_map",
         "source_lightmap_json_path" : "C:/chaos_integrated_tools/data_analysis/scene/current_scene_data.json",
@@ -40,5 +39,64 @@ ALL_LIGHT_MAP_DATA = {
     },
 
 }
+
+def load_light_map_data_from_json(json_path):
+    """从JSON文件加载灯光贴图配置数据
+    
+    Args:
+        json_path: JSON配置文件路径
+        
+    Returns:
+        dict: 加载的配置数据字典
+    """
+    import json
+    import os
+
+    if not json_path:
+        return
+    
+    try:
+        # 检查文件是否存在
+        if not os.path.exists(json_path):
+            print(f"错误: 找不到配置文件 {json_path}")
+            return
+            
+        # 读取JSON文件
+        with open(json_path, 'r', encoding='utf-8') as f:
+            config_data = json.load(f)
+            
+        # 验证数据格式
+        if not isinstance(config_data, dict):
+            print(f"错误: 配置文件格式不正确,应为字典格式")
+            return
+            
+        # 遍历场景配置
+        for scene_name, scene_config in config_data.items():
+            # 验证必需的字段
+            required_fields = [
+                "source_lightmap_texture_path",
+                "source_lightmap_json_path",
+                "source_scene_xml_folder_path",
+                "lightmap_path_in_chaos_assets",
+                "source_terrain_xml_path",
+                "terrain_size_offset",
+                "lightmap_texture_size"
+            ]
+            
+            missing_fields = [field for field in required_fields if field not in scene_config]
+            if missing_fields:
+                print(f"警告: 场景 '{scene_name}' 缺少必需的配置字段: {missing_fields}")
+                continue
+                
+            # 添加到全局配置中
+            ALL_LIGHT_MAP_DATA[scene_name] = scene_config
+            print(f"已加载场景 '{scene_name}' 的配置数据")
+            
+        return 
+        
+    except Exception as e:
+        print(f"加载配置文件时出错: {e}")
+        return
+
 
 DEFAULT_LIGHT_MAP_SCENE_NAME = "basic_level"

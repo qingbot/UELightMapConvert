@@ -32,5 +32,5 @@ if __name__ == '__main__':
     # 列举所有子系统
     
     # 更新StaticMesh的LightmapUV设置
-    # update_static_mesh_lightmap_uv(folder)
+    update_static_mesh_lightmap_uv(folder)
     
