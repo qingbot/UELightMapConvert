@@ -83,5 +83,6 @@
         "typeindex": "cpp",
         "valarray": "cpp",
         "variant": "cpp"
-    }
+    },
+    "cmake.sourceDirectory": "D:/LightMapTool/CPP"
 }

@@ -181,11 +181,22 @@ def group_by_parameters(json_data):
             if not parameters:
                 continue
                 
-            # 获取mesh URL信息
+            # 获取mesh JSON URL信息
             mesh_json_url = parameters.get("MeshJsonURL", "")
-            mesh_data_url = parameters.get("MeshDataURL", "")
             
-            if not mesh_json_url or not mesh_data_url:
+            if not mesh_json_url:
+                continue
+            
+            # 加载引用的JSON文件以获取MeshDataURL
+            try:
+                with open(mesh_json_url, 'r', encoding='utf-8') as f:
+                    referenced_json = json.load(f)
+                    mesh_data_url = referenced_json.get("MeshDataUrl", "")
+                    if not mesh_data_url:
+                        print(f"警告: 在引用的JSON文件中找不到MeshDataUrl: {mesh_json_url}")
+                        continue
+            except Exception as e:
+                print(f"警告: 无法加载引用的JSON文件 {mesh_json_url}: {e}")
                 continue
             
             # 检查是否有LightMap信息
@@ -220,8 +231,9 @@ def group_by_parameters(json_data):
                 "mesh_json_url": mesh_json_url, # 保存原始URL信息
                 "mesh_data_url": mesh_data_url
             })
-    # 如果是直接以物体名为键的格式
+    # 如果是直接以物体名为键的格式，也做相同的处理
     elif is_direct_actor_format(json_data):
+        # 类似的逻辑处理直接以物体名为键的格式
         print("检测到直接物体格式的JSON...")
         for actor_name, actor_data in json_data.items():
             # 跳过非字典类型的值
@@ -236,15 +248,23 @@ def group_by_parameters(json_data):
             if not parameters or not lightmap_info:
                 continue
             
-            # 获取mesh URL信息
+            # 获取mesh JSON URL信息
             mesh_json_url = parameters.get("MeshJsonURL", "")
-            mesh_data_url = parameters.get("MeshDataURL", "")
             
-            if not mesh_json_url or not mesh_data_url:
+            if not mesh_json_url:
                 continue
             
-            # 创建分组键 (使用mesh URL作为键)
-            group_key = f"{mesh_json_url}|{mesh_data_url}"
+            # 加载引用的JSON文件以获取MeshDataURL
+            try:
+                with open(mesh_json_url, 'r', encoding='utf-8') as f:
+                    referenced_json = json.load(f)
+                    mesh_data_url = referenced_json.get("MeshDataUrl", "")
+                    if not mesh_data_url:
+                        print(f"警告: 在引用的JSON文件中找不到MeshDataUrl: {mesh_json_url}")
+                        continue
+            except Exception as e:
+                print(f"警告: 无法加载引用的JSON文件 {mesh_json_url}: {e}")
+                continue
             
             # 获取Lightmap信息
             bias_scale = lightmap_info.get("BiasScale", [])
