@@ -84,3 +84,5 @@ var/
 *~
 .DS_Store
 Thumbs.db 
+
+/example_data

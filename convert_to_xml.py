@@ -247,7 +247,6 @@ def update_xml_with_json(xml_path=None):
     # 如果是单个文件处理模式
     single_file_mode = xml_path is not None
     
-    # 如果源文件不存在,尝试使用测试文件
     if not os.path.exists(json_path):
         raise FileNotFoundError(f"无法找到JSON文件: {json_path}")
     

@@ -1,4 +1,3 @@
-
 ALL_LIGHT_MAP_DATA = {
     "basic_level" : {
         # 从虚幻里导出的场景的lightmap的纹理文件所在的目录
@@ -11,6 +10,8 @@ ALL_LIGHT_MAP_DATA = {
         "lightmap_path_in_chaos_assets" : "_project/New Folder1/lightMaps",
         # 地形的Chaos的XML文件
         "source_terrain_xml_path" : "C:/Users/qingbo.tang/Desktop/ai/basic_level.terrain.ast",
+        # 在LightmapData的AST的路径，最终结果将会输入到这个文件之中
+        "lightmap_data_ast_path_in_chaos" : "D:/ev/dev/wolfgang/_games/proven_ground/_content/New Folder1/lightMaps/lightmap_data.ast",
         # 地形的大小偏移，用以在runtime时，从世界坐标计算lightmap的uv坐标  uv = (world_pos + offset) / size; 注意offset的正负号使得uv: 0<uv<1
         "terrain_size_offset" : [512,512,512,512],
         # 合并为一张大纹理时，该纹理的大小
@@ -28,9 +29,10 @@ ALL_LIGHT_MAP_DATA = {
     "carcassonne" : {
         "source_lightmap_texture_path" : "C:/chaos_integrated_tools/data_analysis/scene/light/light_map",
         "source_lightmap_json_path" : "C:/chaos_integrated_tools/data_analysis/scene/current_scene_data.json",
-        "source_scene_xml_folder_path" : "D:/test/scene",
+        "source_scene_xml_folder_path" : "D:/LightMapTool/example_data/dataLayer",
         "lightmap_path_in_chaos_assets" : "_project/testSimpleLM/lightMaps",
         "source_terrain_xml_path" : "D:/ev/dev/chaos/_content/levels/_test/basic_level/basic_level.terrain.ast",
+        "lightmap_data_ast_path_in_chaos" : "D:/LightMapTool/example_data/result.level_lightmap.ast",
         "terrain_size_offset" : [2048,2048,1024,1024],
         "lightmap_texture_size" : 2048,
 
@@ -99,4 +101,4 @@ def load_light_map_data_from_json(json_path):
         return
 
 
-DEFAULT_LIGHT_MAP_SCENE_NAME = "basic_level"
+DEFAULT_LIGHT_MAP_SCENE_NAME = "carcassonne"
