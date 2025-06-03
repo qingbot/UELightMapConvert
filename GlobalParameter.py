@@ -29,10 +29,10 @@ ALL_LIGHT_MAP_DATA = {
     "carcassonne" : {
         "source_lightmap_texture_path" : "C:/chaos_integrated_tools/data_analysis/scene/light/light_map",
         "source_lightmap_json_path" : "C:/chaos_integrated_tools/data_analysis/scene/current_scene_data.json",
-        "source_scene_xml_folder_path" : "D:/LightMapTool/example_data/dataLayer",
+        "source_scene_xml_folder_path" : "E:\EV\dev\wolfgang\_games\proven_ground\_content\levels\LightMapScene\data_layers\default",
         "lightmap_path_in_chaos_assets" : "_project/testSimpleLM/lightMaps",
         "source_terrain_xml_path" : "D:/ev/dev/chaos/_content/levels/_test/basic_level/basic_level.terrain.ast",
-        "lightmap_data_ast_path_in_chaos" : "D:/LightMapTool/example_data/result.level_lightmap.ast",
+        "lightmap_data_ast_path_in_chaos" : "E:\EV\dev\wolfgang\_games\proven_ground\_content\levels\lightmapscene\TestLightMapData.level_lightmap.ast.level_lightmap.ast",
         "terrain_size_offset" : [2048,2048,1024,1024],
         "lightmap_texture_size" : 2048,
 

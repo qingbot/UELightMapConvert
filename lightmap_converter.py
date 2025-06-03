@@ -6,6 +6,34 @@ import argparse
 from datetime import datetime
 import GlobalParameter
 
+# 全局调试文件句柄
+debug_file = None
+
+def debug_print(message, also_console=True):
+    """打印调试信息到文件和控制台"""
+    global debug_file
+    if debug_file:
+        debug_file.write(str(message) + '\n')
+        debug_file.flush()  # 立即写入文件
+    if also_console:
+        print(message)
+
+def init_debug_file(scene_name):
+    """初始化调试文件"""
+    global debug_file
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    debug_filename = f"lightmap_converter_debug_{scene_name}_{timestamp}.log"
+    debug_file = open(debug_filename, 'w', encoding='utf-8')
+    debug_print(f"调试日志文件: {debug_filename}")
+    return debug_filename
+
+def close_debug_file():
+    """关闭调试文件"""
+    global debug_file
+    if debug_file:
+        debug_file.close()
+        debug_file = None
+
 # 该程序从给定的文件夹中读取全部的xml文件，然后读取xml文件中的物体信息，
 # 然后读取json文件中的物体信息，然后匹配xml和json中的物体信息
 # 将匹配的结果，从二者中提取出lightmap相关的数据，然后更新到xml文件中
@@ -257,19 +285,23 @@ def process_special_object(obj_name, obj_data, result_dict):
         print(f"对象 {obj_name} 缺少位置信息，跳过")
         return
     
-    # 提取光照图数据
+    # 提取光照图数据 - 必须有有效的lightmap数据才添加
     lightmap_data = {}
+    has_valid_lightmap = False
+    
     if "LightMap" in obj_data and isinstance(obj_data["LightMap"], dict):
         lm_data = obj_data["LightMap"]
         
-        # 提取CoefAdd - 修改逻辑，不再要求长度>11，不再只取固定索引
-        if "CoefAdd" in lm_data and isinstance(lm_data["CoefAdd"], list):
+        # 提取CoefAdd - 必须存在且有效
+        if "CoefAdd" in lm_data and isinstance(lm_data["CoefAdd"], list) and len(lm_data["CoefAdd"]) > 0:
             lightmap_data["CoefAdd"] = lm_data["CoefAdd"]
+            has_valid_lightmap = True
             print(f"找到CoefAdd: {lightmap_data['CoefAdd']}")
         
-        # 提取CoefScale - 修改逻辑，不再要求长度>11，不再只取固定索引
-        if "CoefScale" in lm_data and isinstance(lm_data["CoefScale"], list):
+        # 提取CoefScale - 必须存在且有效
+        if "CoefScale" in lm_data and isinstance(lm_data["CoefScale"], list) and len(lm_data["CoefScale"]) > 0:
             lightmap_data["CoefScale"] = lm_data["CoefScale"]
+            has_valid_lightmap = True
             print(f"找到CoefScale: {lightmap_data['CoefScale']}")
         
         # 提取BiasScale
@@ -282,16 +314,16 @@ def process_special_object(obj_name, obj_data, result_dict):
             lightmap_data["LQ"] = lm_data["LQ"]
             print(f"找到LQ: {lightmap_data['LQ']}")
     
-    # 即使没有完整的光照图数据，也添加物体 - 放宽条件
-    if position:
+    # 只有当有有效的lightmap数据时才添加物体
+    if has_valid_lightmap and position:
         result_dict[obj_name] = {
             "position": position,
             "lightmap": lightmap_data
         }
-        print(f"成功加载特殊格式JSON物体: {obj_name}, 位置: {position}")
+        print(f"成功加载特殊格式JSON物体: {obj_name}, 位置: {position}, 有lightmap数据")
         return
     
-    print(f"对象 {obj_name} 缺少位置信息，跳过")
+    print(f"对象 {obj_name} 没有有效的lightmap数据，跳过")
 
 def process_object(obj_name, obj_data, result_dict):
     """处理单个物体的数据并添加到结果字典中"""
@@ -313,8 +345,10 @@ def process_object(obj_name, obj_data, result_dict):
         print(f"对象 {obj_name} 缺少位置信息，跳过")
         return
         
-    # 提取光照图数据
+    # 提取光照图数据 - 必须有有效的lightmap数据才添加
     lightmap_data = {}
+    has_valid_lightmap = False
+    
     # 查找lightmap相关的键
     lightmap_key = None
     for key in ["LightMap", "lightmap", "Lightmap", "LIGHTMAP"]:
@@ -326,14 +360,16 @@ def process_object(obj_name, obj_data, result_dict):
     if lightmap_key:
         lm_data = obj_data[lightmap_key]
         
-        # 提取CoefAdd - 修改逻辑，不再要求长度>11，不再只取固定索引
-        if "CoefAdd" in lm_data and isinstance(lm_data["CoefAdd"], list):
+        # 提取CoefAdd - 必须存在且有效
+        if "CoefAdd" in lm_data and isinstance(lm_data["CoefAdd"], list) and len(lm_data["CoefAdd"]) > 0:
             lightmap_data["CoefAdd"] = lm_data["CoefAdd"]
+            has_valid_lightmap = True
             print(f"找到CoefAdd: {lightmap_data['CoefAdd']}")
         
-        # 提取CoefScale - 修改逻辑，不再要求长度>11，不再只取固定索引
-        if "CoefScale" in lm_data and isinstance(lm_data["CoefScale"], list):
+        # 提取CoefScale - 必须存在且有效
+        if "CoefScale" in lm_data and isinstance(lm_data["CoefScale"], list) and len(lm_data["CoefScale"]) > 0:
             lightmap_data["CoefScale"] = lm_data["CoefScale"]
+            has_valid_lightmap = True
             print(f"找到CoefScale: {lightmap_data['CoefScale']}")
         
         # 提取BiasScale
@@ -346,16 +382,16 @@ def process_object(obj_name, obj_data, result_dict):
             lightmap_data["LQ"] = lm_data["LQ"]
             print(f"找到LQ: {lightmap_data['LQ']}")
     
-    # 即使没有完整的光照图数据，也添加物体 - 放宽条件
-    if position:
+    # 只有当有有效的lightmap数据时才添加物体
+    if has_valid_lightmap and position:
         result_dict[obj_name] = {
             "position": position,
             "lightmap": lightmap_data
         }
-        print(f"成功加载JSON物体: {obj_name}, 位置: {position}")
+        print(f"成功加载JSON物体: {obj_name}, 位置: {position}, 有lightmap数据")
         return
     
-    print(f"对象 {obj_name} 缺少位置信息，跳过")
+    print(f"对象 {obj_name} 没有有效的lightmap数据，跳过")
 
 def print_json_structure(data, level=0, max_level=3):
     """打印JSON的结构以便调试"""
@@ -390,12 +426,15 @@ def match_objects(xml_objects, json_objects):
     匹配XML和JSON中的物体，仅使用精确的字符串匹配
     
     Returns:
-        list: 包含匹配信息的列表，格式为 [{xml_name, json_name, data_ref, lightmap_data}, ...]
+        tuple: (matches, unmatched_xml, unmatched_json)
+            matches: 包含匹配信息的列表，格式为 [{xml_name, json_name, data_ref, lightmap_data}, ...]
+            unmatched_xml: 未匹配的XML物体字典
+            unmatched_json: 未匹配的JSON物体字典
     """
     matches = []
     
     # 仅使用精确字符串匹配
-    print("\n开始进行精确字符串匹配...")
+    debug_print("\n开始进行精确字符串匹配...")
     for xml_name, xml_obj in xml_objects.items():
         # 检查是否有完全匹配的JSON对象键名
         if xml_name in json_objects:
@@ -405,17 +444,192 @@ def match_objects(xml_objects, json_objects):
                 "data_ref": xml_obj["data_ref"],
                 "lightmap_data": json_objects[xml_name]["lightmap"]
             })
-            print(f"精确匹配成功: XML物体 '{xml_name}' 与 JSON物体 '{xml_name}'")
+            debug_print(f"精确匹配成功: XML物体 '{xml_name}' 与 JSON物体 '{xml_name}'")
     
     # 统计匹配情况
     matched_xml_names = [m["xml_name"] for m in matches]
+    matched_json_names = [m["json_name"] for m in matches]
+    
     unmatched_xml = {name: obj for name, obj in xml_objects.items() if name not in matched_xml_names}
+    unmatched_json = {name: obj for name, obj in json_objects.items() if name not in matched_json_names}
     
-    print(f"\n匹配结果: 精确匹配成功 {len(matches)} 个物体，未匹配 {len(unmatched_xml)} 个物体")
+    debug_print(f"\n匹配结果: 精确匹配成功 {len(matches)} 个物体")
+    debug_print(f"XML中未匹配物体数量: {len(unmatched_xml)}")
+    debug_print(f"JSON中未匹配物体数量: {len(unmatched_json)}")
     
-    # 测试模式下的特殊处理已被移除，遵循严格的精确匹配原则
+    return matches, unmatched_xml, unmatched_json
+
+def analyze_unmatched_objects(all_unmatched_xml, all_unmatched_json, target_object_name=None):
+    """
+    分析未匹配的物体，输出详细信息
     
-    return matches
+    Args:
+        all_unmatched_xml: 所有未匹配的XML物体
+        all_unmatched_json: 所有未匹配的JSON物体
+        target_object_name: 特定要查找的物体名称
+    """
+    debug_print("\n" + "="*80)
+    debug_print("未匹配物体分析报告")
+    debug_print("="*80)
+    
+    # 输出XML中未匹配的物体
+    debug_print(f"\nXML中未匹配的物体 (共{len(all_unmatched_xml)}个):")
+    debug_print("-" * 60)
+    for i, (xml_name, xml_obj) in enumerate(all_unmatched_xml.items(), 1):
+        debug_print(f"{i:4d}. {xml_name}")
+        debug_print(f"      position: {xml_obj.get('position', 'N/A')}")
+        debug_print(f"      data_ref: {xml_obj.get('data_ref', 'N/A')}")
+        
+        # 检查是否是目标物体
+        if target_object_name and target_object_name in xml_name:
+            debug_print(f"      *** 这是目标物体! ***")
+    
+    # 输出JSON中未匹配的物体  
+    debug_print(f"\nJSON中未匹配的物体 (共{len(all_unmatched_json)}个):")
+    debug_print("-" * 60)
+    for i, (json_name, json_obj) in enumerate(all_unmatched_json.items(), 1):
+        debug_print(f"{i:4d}. {json_name}")
+        debug_print(f"      position: {json_obj.get('position', 'N/A')}")
+        lightmap_data = json_obj.get('lightmap', {})
+        if lightmap_data:
+            debug_print(f"      lightmap keys: {list(lightmap_data.keys())}")
+            if 'CoefAdd' in lightmap_data:
+                debug_print(f"      CoefAdd length: {len(lightmap_data['CoefAdd']) if isinstance(lightmap_data['CoefAdd'], list) else 'not list'}")
+            if 'CoefScale' in lightmap_data:
+                debug_print(f"      CoefScale length: {len(lightmap_data['CoefScale']) if isinstance(lightmap_data['CoefScale'], list) else 'not list'}")
+        else:
+            debug_print(f"      lightmap: 空")
+            
+        # 检查是否包含目标物体名称的一部分
+        if target_object_name:
+            # 尝试部分匹配
+            if target_object_name in json_name or json_name in target_object_name:
+                debug_print(f"      *** 可能是目标物体的匹配项! ***")
+    
+    # 如果指定了目标物体，进行更详细的分析
+    if target_object_name:
+        debug_print(f"\n目标物体 '{target_object_name}' 详细分析:")
+        debug_print("-" * 60)
+        
+        # 检查是否在XML中存在
+        xml_found = False
+        for xml_name in all_unmatched_xml.keys():
+            if target_object_name in xml_name:
+                debug_print(f"在XML中找到相似名称: {xml_name}")
+                xml_found = True
+        
+        if not xml_found:
+            debug_print("在XML中未找到包含此名称的物体")
+        
+        # 检查是否在JSON中存在相似的
+        json_found = False
+        debug_print("\nJSON中可能的匹配项:")
+        for json_name in all_unmatched_json.keys():
+            # 尝试多种匹配策略
+            similarity_score = 0
+            target_parts = target_object_name.split('_')
+            json_parts = json_name.split('_')
+            
+            # 计算相同部分的数量
+            common_parts = set(target_parts) & set(json_parts)
+            if common_parts:
+                similarity_score = len(common_parts) / max(len(target_parts), len(json_parts))
+                debug_print(f"  {json_name} (相似度: {similarity_score:.2f}, 共同部分: {common_parts})")
+                json_found = True
+        
+        if not json_found:
+            debug_print("  在JSON中未找到相似的物体名称")
+    
+    debug_print("\n" + "="*80)
+
+def generate_unmatched_summary(all_unmatched_xml, all_unmatched_json):
+    """
+    生成未匹配物体的总结报告
+    
+    Args:
+        all_unmatched_xml: 所有未匹配的XML物体
+        all_unmatched_json: 所有未匹配的JSON物体
+    """
+    debug_print("\n" + "="*80)
+    debug_print("未匹配物体名称总结")
+    debug_print("="*80)
+    
+    # XML未匹配物体名称列表
+    debug_print(f"\n### XML中未匹配的物体名称 (共{len(all_unmatched_xml)}个) ###")
+    debug_print("-" * 80)
+    if all_unmatched_xml:
+        for i, xml_name in enumerate(sorted(all_unmatched_xml.keys()), 1):
+            debug_print(f"{i:4d}. {xml_name}")
+    else:
+        debug_print("无")
+    
+    # JSON未匹配物体名称列表
+    debug_print(f"\n### JSON中未匹配的物体名称 (共{len(all_unmatched_json)}个) ###")
+    debug_print("-" * 80)
+    if all_unmatched_json:
+        # 按名称排序便于查找
+        sorted_json_names = sorted(all_unmatched_json.keys())
+        for i, json_name in enumerate(sorted_json_names, 1):
+            debug_print(f"{i:4d}. {json_name}")
+    else:
+        debug_print("无")
+    
+    # 添加一些分析提示
+    debug_print(f"\n### 分析提示 ###")
+    debug_print("-" * 80)
+    debug_print(f"- XML未匹配物体数量: {len(all_unmatched_xml)}")
+    debug_print(f"- JSON未匹配物体数量: {len(all_unmatched_json)}")
+    
+    if all_unmatched_xml and all_unmatched_json:
+        debug_print(f"- 建议检查命名差异：大小写、特殊字符、前缀后缀等")
+        debug_print(f"- 可以尝试部分匹配或模糊匹配来找到对应关系")
+    elif len(all_unmatched_xml) > 0:
+        debug_print(f"- XML中有未匹配物体，但JSON中已全部匹配，可能存在重复或映射问题")
+    elif len(all_unmatched_json) > 0:
+        debug_print(f"- JSON中有未匹配物体，但XML中已全部匹配，可能JSON包含了额外的物体")
+    else:
+        debug_print(f"- 所有物体都已匹配！")
+    
+    debug_print("\n" + "="*80)
+
+def collect_all_unmatched_objects(xml_files, json_objects):
+    """
+    收集所有文件中未匹配的物体
+    
+    Returns:
+        tuple: (all_unmatched_xml, all_unmatched_json)
+    """
+    all_unmatched_xml = {}
+    all_matched_json_names = set()
+    
+    # 处理每个XML文件
+    for xml_file in xml_files:
+        debug_print(f"\n分析XML文件: {xml_file}")
+        
+        # 读取XML物体
+        xml_objects = read_xml_objects(xml_file)
+        if not xml_objects:
+            debug_print(f"未能从{xml_file}中读取物体，跳过")
+            continue
+        
+        # 匹配物体
+        file_matches, unmatched_xml, unmatched_json = match_objects(xml_objects, json_objects)
+        if not file_matches:
+            debug_print(f"在{xml_file}中未找到匹配的物体，跳过此文件")
+            continue
+        
+        # 收集未匹配的XML物体
+        all_unmatched_xml.update(unmatched_xml)
+        
+        # 记录已匹配的JSON物体名称
+        for match in file_matches:
+            all_matched_json_names.add(match["json_name"])
+    
+    # 计算未匹配的JSON物体
+    all_unmatched_json = {name: obj for name, obj in json_objects.items() 
+                         if name not in all_matched_json_names}
+    
+    return all_unmatched_xml, all_unmatched_json
 
 def create_lightmap_element(data_ref, lightmap_data, lightmap_path):
     """
@@ -423,62 +637,105 @@ def create_lightmap_element(data_ref, lightmap_data, lightmap_path):
     
     Args:
         data_ref: 目标的data_ref
-        lightmap_data: 光照图数据
+        lightmap_data: 光照图数据（必须包含有效数据）
         lightmap_path: 光照图路径
         
     Returns:
         Element: 创建的lightmap元素
     """
+    # 调试信息：打印传入的数据
+    debug_print(f"\n=== 调试create_lightmap_element ===", False)
+    debug_print(f"data_ref: {data_ref}", False)
+    debug_print(f"lightmap_data类型: {type(lightmap_data)}", False)
+    debug_print(f"lightmap_data内容: {lightmap_data}", False)
+    
+    # 验证lightmap_data必须包含有效数据
+    if not lightmap_data or not isinstance(lightmap_data, dict):
+        debug_print(f"错误: lightmap_data为空或不是字典类型", False)
+        return None
+    
+    # 验证必须包含CoefAdd或CoefScale中的至少一个
+    has_coef_add = "CoefAdd" in lightmap_data and isinstance(lightmap_data["CoefAdd"], list) and len(lightmap_data["CoefAdd"]) > 0
+    has_coef_scale = "CoefScale" in lightmap_data and isinstance(lightmap_data["CoefScale"], list) and len(lightmap_data["CoefScale"]) > 0
+    
+    if not (has_coef_add or has_coef_scale):
+        debug_print(f"错误: lightmap_data缺少有效的CoefAdd或CoefScale数据", False)
+        return None
+    
     element = ET.Element("element", {"sketum_id": generate_sketum_id()})
     
-    # 添加Target元素
-    target = ET.SubElement(element, "Target")
-    target.text = data_ref if data_ref else "FFFF"
+    # 添加key元素（原来的Target）
+    key = ET.SubElement(element, "key")
+    key.text = data_ref if data_ref else "FFFF"
     
-    # 添加CoefAdd元素
-    coef_add = ET.SubElement(element, "CoefAdd")
-    if "CoefAdd" in lightmap_data and isinstance(lightmap_data["CoefAdd"], list):
-        # 如果数组长度足够，取索引8-11位置的值，否则使用整个数组或默认值
+    # 添加data容器元素
+    data = ET.SubElement(element, "data")
+    
+    # 在data容器内添加CoefAdd元素 - 只有存在有效数据时才添加
+    if has_coef_add:
+        coef_add = ET.SubElement(data, "CoefAdd")
+        debug_print(f"\n--- 处理CoefAdd ---", False)
+        coef_add_raw = lightmap_data["CoefAdd"]
+        debug_print(f"原始CoefAdd数组长度: {len(coef_add_raw)}", False)
+        debug_print(f"原始CoefAdd前12个元素: {coef_add_raw[:12] if len(coef_add_raw) >= 12 else coef_add_raw}", False)
+        
+        # 如果数组长度足够，取索引8-11位置的值，否则使用整个数组
         if len(lightmap_data["CoefAdd"]) > 11:
             coef_add_values = lightmap_data["CoefAdd"][8:12]
+            debug_print(f"取索引8-11的CoefAdd值: {coef_add_values}", False)
         elif len(lightmap_data["CoefAdd"]) >= 4:
             coef_add_values = lightmap_data["CoefAdd"][:4]
+            debug_print(f"取前4个CoefAdd值: {coef_add_values}", False)
         else:
-            coef_add_values = [1.0, 0.0, 0.0, 0.0]
+            # 数据不足4个，但仍然使用现有数据，补充到4个
+            coef_add_values = list(lightmap_data["CoefAdd"]) + [0.0] * (4 - len(lightmap_data["CoefAdd"]))
+            debug_print(f"CoefAdd数据不足4个，补充到4个: {coef_add_values}", False)
+        
         coef_add_value = " ".join([format_float(val) for val in coef_add_values])
-    else:
-        coef_add_value = "1.000000 0.000000 0.000000 0.000000"
-    coef_add.text = coef_add_value
+        debug_print(f"最终CoefAdd字符串: {coef_add_value}", False)
+        coef_add.text = coef_add_value
     
-    # 添加CoefScale元素
-    coef_scale = ET.SubElement(element, "CoefScale")
-    if "CoefScale" in lightmap_data and isinstance(lightmap_data["CoefScale"], list):
-        # 如果数组长度足够，取索引8-11位置的值，否则使用整个数组或默认值
+    # 在data容器内添加CoefScale元素 - 只有存在有效数据时才添加
+    if has_coef_scale:
+        coef_scale = ET.SubElement(data, "CoefScale")
+        debug_print(f"\n--- 处理CoefScale ---", False)
+        coef_scale_raw = lightmap_data["CoefScale"]
+        debug_print(f"原始CoefScale数组长度: {len(coef_scale_raw)}", False)
+        debug_print(f"原始CoefScale前12个元素: {coef_scale_raw[:12] if len(coef_scale_raw) >= 12 else coef_scale_raw}", False)
+        
+        # 如果数组长度足够，取索引8-11位置的值，否则使用整个数组
         if len(lightmap_data["CoefScale"]) > 11:
             coef_scale_values = lightmap_data["CoefScale"][8:12]
+            debug_print(f"取索引8-11的CoefScale值: {coef_scale_values}", False)
         elif len(lightmap_data["CoefScale"]) >= 4:
             coef_scale_values = lightmap_data["CoefScale"][:4]
+            debug_print(f"取前4个CoefScale值: {coef_scale_values}", False)
         else:
-            coef_scale_values = [1.0, 1.0, 0.0, 0.0]
+            # 数据不足4个，但仍然使用现有数据，补充到4个
+            coef_scale_values = list(lightmap_data["CoefScale"]) + [0.0] * (4 - len(lightmap_data["CoefScale"]))
+            debug_print(f"CoefScale数据不足4个，补充到4个: {coef_scale_values}", False)
+        
         coef_scale_value = " ".join([format_float(val) for val in coef_scale_values])
-    else:
-        coef_scale_value = "1.000000 1.000000 0.000000 0.000000"
-    coef_scale.text = coef_scale_value
+        debug_print(f"最终CoefScale字符串: {coef_scale_value}", False)
+        coef_scale.text = coef_scale_value
     
-    # 添加BiasScale元素
-    bias_scale = ET.SubElement(element, "BiasScale")
-    if "BiasScale" in lightmap_data and isinstance(lightmap_data["BiasScale"], list):
-        if len(lightmap_data["BiasScale"]) >= 4:
-            bias_scale_values = lightmap_data["BiasScale"][:4]
+    # 在data容器内添加BiasScale元素 - 如果存在的话
+    if "BiasScale" in lightmap_data:
+        bias_scale = ET.SubElement(data, "BiasScale")
+        if isinstance(lightmap_data["BiasScale"], list) and len(lightmap_data["BiasScale"]) > 0:
+            if len(lightmap_data["BiasScale"]) >= 4:
+                bias_scale_values = lightmap_data["BiasScale"][:4]
+            else:
+                bias_scale_values = list(lightmap_data["BiasScale"]) + [0.0] * (4 - len(lightmap_data["BiasScale"]))
+            bias_scale_value = " ".join([format_float(val) for val in bias_scale_values])
+            bias_scale.text = bias_scale_value
         else:
-            bias_scale_values = [1.0, 0.0, 0.0, 0.0]
-        bias_scale_value = " ".join([format_float(val) for val in bias_scale_values])
-    else:
-        bias_scale_value = "1.000000 0.000000 0.000000 0.000000"
-    bias_scale.text = bias_scale_value
+            # BiasScale存在但不是有效的列表，跳过
+            debug_print(f"BiasScale存在但数据无效，跳过", False)
+            data.remove(bias_scale)
     
-    # 添加LightMap元素
-    light_map = ET.SubElement(element, "LightMap")
+    # 在data容器内添加LightMap元素
+    light_map = ET.SubElement(data, "LightMap")
     
     # 添加url元素
     url = ET.SubElement(light_map, "url")
@@ -495,9 +752,10 @@ def create_lightmap_element(data_ref, lightmap_data, lightmap_path):
     parameter = ET.SubElement(light_map, "parameter")
     parameters = ET.SubElement(parameter, "parameters")
     
+    debug_print(f"=== 调试create_lightmap_element结束 ===\n", False)
     return element
 
-def create_or_update_lightmap_xml(matches, output_path, lightmap_path, overwrite_all=False):
+def create_or_update_lightmap_xml(matches, output_path, lightmap_path, overwrite_all=False, terrain_data=None, scene_config=None):
     """
     创建或更新lightmap XML文件
     
@@ -506,6 +764,8 @@ def create_or_update_lightmap_xml(matches, output_path, lightmap_path, overwrite
         output_path: 输出文件路径
         lightmap_path: 光照图路径
         overwrite_all: 是否完全覆盖生成新文件
+        terrain_data: 地形数据(可选)
+        scene_config: 场景配置(可选)
     """
     try:
         # 检查是否需要完全覆盖
@@ -551,11 +811,67 @@ def create_or_update_lightmap_xml(matches, output_path, lightmap_path, overwrite
         added_count = 0
         for match in matches:
             try:
+                # 添加调试信息，特别关注指定的物体
+                xml_name = match["xml_name"]
+                if "objects_environment_buildings_wall_SSLM_citywall01_SSLM_citywall01_part_B_connect_01_lod0_mesh_ast_76" in xml_name:
+                    debug_print(f"\n!!! 找到目标物体: {xml_name} !!!")
+                    debug_print(f"match数据结构: {match.keys()}")
+                    debug_print(f"lightmap_data类型: {type(match['lightmap_data'])}")
+                    debug_print(f"lightmap_data内容: {match['lightmap_data']}")
+                
                 element = create_lightmap_element(match["data_ref"], match["lightmap_data"], lightmap_path)
-                lightmap_data.append(element)
-                added_count += 1
+                if element is not None:  # 只有成功创建元素时才添加
+                    lightmap_data.append(element)
+                    added_count += 1
+                else:
+                    print(f"跳过物体 {match['xml_name']}：没有有效的lightmap数据")
             except Exception as e:
                 print(f"添加物体 {match['xml_name']} 时出错: {str(e)}")
+                import traceback
+                traceback.print_exc()
+        
+        # 处理地形数据 - 在lightmap_data的同级添加terrain_lightmap_data
+        if terrain_data and scene_config:
+            debug_print("开始处理地形数据...")
+            try:
+                # 查找是否已存在terrain_lightmap_data元素
+                existing_terrain_data = root.find("terrain_lightmap_data")
+                if existing_terrain_data is None:
+                    existing_terrain_data = root.find("ns:terrain_lightmap_data", XML_NS)
+                
+                # 如果存在，先移除
+                if existing_terrain_data is not None:
+                    debug_print("找到现有的terrain_lightmap_data元素，正在移除...")
+                    root.remove(existing_terrain_data)
+                
+                # 创建新的terrain_lightmap_data元素
+                terrain_lightmap_element = create_terrain_lightmap_element(terrain_data, lightmap_path, scene_config)
+                
+                # 将terrain_lightmap_data添加到root中，放在lightmap_data之后
+                # 查找lightmap_data的位置
+                lightmap_data_index = -1
+                for i, child in enumerate(root):
+                    if child.tag == "lightmap_data" or child.tag.endswith("}lightmap_data"):
+                        lightmap_data_index = i
+                        break
+                
+                if lightmap_data_index != -1:
+                    # 在lightmap_data之后插入terrain_lightmap_data
+                    root.insert(lightmap_data_index + 1, terrain_lightmap_element)
+                    debug_print(f"在lightmap_data之后(索引{lightmap_data_index + 1})插入terrain_lightmap_data")
+                else:
+                    # 如果找不到lightmap_data，就添加到末尾
+                    root.append(terrain_lightmap_element)
+                    debug_print("在根元素末尾添加terrain_lightmap_data")
+                
+                print(f"成功添加地形光照图数据: {terrain_data['combine_name']}")
+                
+            except Exception as e:
+                print(f"添加地形数据时出错: {str(e)}")
+                import traceback
+                traceback.print_exc()
+        elif terrain_data:
+            print("警告: 有地形数据但缺少场景配置，跳过地形数据处理")
         
         # 格式化XML以便更好的可读性
         def indent(elem, level=0):
@@ -580,11 +896,11 @@ def create_or_update_lightmap_xml(matches, output_path, lightmap_path, overwrite
         tree.write(output_path, encoding='UTF-8', xml_declaration=True)
         
         if overwrite_all and os.path.exists(output_path):
-            print(f"成功使用全新的XML文件替换 {output_path}，包含 {added_count} 个物体")
+            print(f"成功使用全新的XML文件替换 {output_path}，包含 {added_count} 个物体" + (f" 和地形数据" if terrain_data else ""))
         elif os.path.exists(output_path):
-            print(f"成功写入 {added_count} 个物体到 {output_path}，完全覆盖了原有的lightmap_data内容")
+            print(f"成功写入 {added_count} 个物体到 {output_path}，完全覆盖了原有的lightmap_data内容" + (f" 并添加了地形数据" if terrain_data else ""))
         else:
-            print(f"成功创建包含 {added_count} 个物体的新XML文件 {output_path}")
+            print(f"成功创建包含 {added_count} 个物体的新XML文件 {output_path}" + (f" 和地形数据" if terrain_data else ""))
         
     except Exception as e:
         print(f"创建或更新lightmap XML失败: {str(e)}")
@@ -642,6 +958,203 @@ def create_new_xml_structure(lightmap_path):
     
     return root, lightmap_data
 
+def extract_terrain_data_from_json(json_data):
+    """
+    从JSON数据中提取地形的Lightmap数据
+    
+    Args:
+        json_data: 完整的JSON数据对象
+    
+    Returns:
+        dict: 包含地形Lightmap数据的字典，如果找不到则返回None
+    """
+    try:
+        debug_print("开始提取地形数据...")
+        
+        # 查找地形数据 - 首先尝试直接在根级别查找
+        if "Landscape" in json_data:
+            debug_print("在根级别找到Landscape数据")
+            landscape_data = json_data["Landscape"]
+            
+            # 检查是否有嵌套的Landscape
+            if isinstance(landscape_data, dict) and "Landscape" in landscape_data:
+                landscape_data = landscape_data["Landscape"]
+                debug_print("找到嵌套的Landscape数据")
+            
+            # 检查是否有lightmapGroup
+            if isinstance(landscape_data, dict) and "lightmapGroup" in landscape_data:
+                lightmap_group = landscape_data["lightmapGroup"]
+                debug_print(f"找到lightmapGroup，包含键: {list(lightmap_group.keys())}")
+                
+                # 检查是否有combine字段，这是合并后的贴图名称
+                if "combine" in lightmap_group:
+                    combine_name = lightmap_group["combine"]
+                    debug_print(f"找到地形合并的Lightmap: {combine_name}")
+                    
+                    # 查找所有网格的系数数据
+                    coef_scales = []
+                    coef_adds = []
+                    
+                    # 遍历所有网格，收集系数
+                    for key, tile_data in lightmap_group.items():
+                        if key == "combine":
+                            continue
+                        
+                        if isinstance(tile_data, dict):
+                            if "CoefScale" in tile_data and "CoefAdd" in tile_data:
+                                # 提取需要的系数数据
+                                coef_scale = tile_data.get("CoefScale", [])
+                                coef_add = tile_data.get("CoefAdd", [])
+                                
+                                debug_print(f"网格 {key}: CoefScale长度={len(coef_scale)}, CoefAdd长度={len(coef_add)}")
+                                
+                                # 确保我们有足够的数据
+                                if len(coef_scale) >= 12 and len(coef_add) >= 12:
+                                    # 通常系数在索引8-11位置
+                                    coef_scales.append(coef_scale[8:12])
+                                    coef_adds.append(coef_add[8:12])
+                                    debug_print(f"网格 {key}: 提取的CoefScale[8:12]={coef_scale[8:12]}, CoefAdd[8:12]={coef_add[8:12]}")
+                    
+                    # 如果找到系数数据，计算平均值
+                    if coef_scales and coef_adds:
+                        # 计算平均系数
+                        avg_coef_scale = [sum(col)/len(col) for col in zip(*coef_scales)]
+                        avg_coef_add = [sum(col)/len(col) for col in zip(*coef_adds)]
+                        
+                        debug_print(f"计算了 {len(coef_scales)} 个网格的平均系数")
+                        debug_print(f"平均CoefScale: {avg_coef_scale}")
+                        debug_print(f"平均CoefAdd: {avg_coef_add}")
+                        
+                        # 返回结果
+                        return {
+                            "combine_name": combine_name,
+                            "lightmap_coef_scale": avg_coef_scale,
+                            "lightmap_coef_add": avg_coef_add
+                        }
+                    else:
+                        debug_print("未找到有效的系数数据")
+                        return None
+                else:
+                    debug_print("未找到地形合并的Lightmap名称")
+                    return None
+            else:
+                debug_print("未找到lightmapGroup数据")
+                return None
+        else:
+            debug_print("未在JSON中找到Landscape数据")
+            
+            # 如果在根级别找不到，尝试在'Terrain'字段中查找
+            if "Terrain" in json_data:
+                debug_print("尝试在Terrain字段中查找数据")
+                terrain_data = json_data["Terrain"]
+                
+                # 查找合并的Lightmap信息
+                if isinstance(terrain_data, dict) and "lightmap" in terrain_data:
+                    lightmap_data = terrain_data["lightmap"]
+                    
+                    if "combine_name" in lightmap_data:
+                        combine_name = lightmap_data["combine_name"]
+                        debug_print(f"找到地形合并的Lightmap: {combine_name}")
+                        
+                        # 查找系数数据
+                        if "coef_scale" in lightmap_data and "coef_add" in lightmap_data:
+                            coef_scale = lightmap_data["coef_scale"]
+                            coef_add = lightmap_data["coef_add"]
+                            
+                            return {
+                                "combine_name": combine_name,
+                                "lightmap_coef_scale": coef_scale,
+                                "lightmap_coef_add": coef_add
+                            }
+        
+        debug_print("未能找到有效的地形Lightmap数据")
+        return None
+        
+    except Exception as e:
+        debug_print(f"提取地形数据时出错: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+def create_terrain_lightmap_element(terrain_data, lightmap_path, scene_config):
+    """
+    创建一个terrain_lightmap_data元素
+    
+    Args:
+        terrain_data: 地形光照图数据
+        lightmap_path: 光照图路径
+        scene_config: 场景配置信息
+        
+    Returns:
+        Element: 创建的terrain_lightmap_data元素
+    """
+    debug_print(f"\n=== 创建terrain_lightmap_data元素 ===")
+    debug_print(f"terrain_data: {terrain_data}")
+    debug_print(f"lightmap_path: {lightmap_path}")
+    
+    # 创建terrain_lightmap_data元素
+    terrain_lightmap_data = ET.Element("terrain_lightmap_data")
+    
+    # 创建CoefAdd元素
+    coef_add = ET.SubElement(terrain_lightmap_data, "CoefAdd")
+    coef_add_values = terrain_data["lightmap_coef_add"]
+    coef_add_value = " ".join([format_float(val) for val in coef_add_values])
+    coef_add.text = coef_add_value
+    debug_print(f"CoefAdd: {coef_add_value}")
+    
+    # 创建CoefScale元素
+    coef_scale = ET.SubElement(terrain_lightmap_data, "CoefScale")
+    coef_scale_values = terrain_data["lightmap_coef_scale"]
+    coef_scale_value = " ".join([format_float(val) for val in coef_scale_values])
+    coef_scale.text = coef_scale_value
+    debug_print(f"CoefScale: {coef_scale_value}")
+    
+    # 计算BiasScale值，使用terrain_size_offset参数
+    if "terrain_size_offset" in scene_config:
+        terrain_size_offset = scene_config["terrain_size_offset"]
+        if len(terrain_size_offset) >= 4:
+            size_x, size_y, offset_x, offset_y = terrain_size_offset
+            
+            # 计算scale和bias
+            # scale = 1 / size
+            scale_u = 1.0 / size_x if size_x != 0 else 0.0
+            scale_v = 1.0 / size_y if size_y != 0 else 0.0
+            
+            # bias = offset / size (确保uv计算时能正确映射到[0,1]区间)
+            bias_u = offset_x / size_x if size_x != 0 else 0.0
+            bias_v = offset_y / size_y if size_y != 0 else 0.0
+            
+            bias_scale_text = f"{format_float(bias_u)} {format_float(bias_v)} {format_float(scale_u)} {format_float(scale_v)}"
+            debug_print(f"使用配置的terrain_size_offset [{size_x}, {size_y}, {offset_x}, {offset_y}] 计算BiasScale: {bias_scale_text}")
+        else:
+            debug_print(f"警告: terrain_size_offset数组长度不足 ({len(terrain_size_offset)}), 使用默认BiasScale值")
+            bias_scale_text = "0.000000 0.000000 1.000000 1.000000"
+    else:
+        debug_print(f"警告: 未找到terrain_size_offset配置, 使用默认BiasScale值")
+        bias_scale_text = "0.000000 0.000000 1.000000 1.000000"
+    
+    # 创建BiasScale元素
+    bias_scale = ET.SubElement(terrain_lightmap_data, "BiasScale")
+    bias_scale.text = bias_scale_text
+    debug_print(f"BiasScale: {bias_scale_text}")
+    
+    # 创建LightMap元素 (注意这里用的是LightMap而不是terrainLightMap，与示例保持一致)
+    light_map = ET.SubElement(terrain_lightmap_data, "LightMap")
+    
+    # 创建url元素
+    url = ET.SubElement(light_map, "url")
+    combine_name = terrain_data["combine_name"]
+    url.text = f"{lightmap_path}/{combine_name}.texture.ast"
+    debug_print(f"LightMap URL: {url.text}")
+    
+    # 创建guid和parameter元素
+    guid = ET.SubElement(light_map, "guid")
+    parameter = ET.SubElement(light_map, "parameter")
+    parameters = ET.SubElement(parameter, "parameters")
+    
+    debug_print(f"=== terrain_lightmap_data元素创建完成 ===\n")
+    return terrain_lightmap_data
+
 def main():
     parser = argparse.ArgumentParser(description="匹配XML和JSON物体并生成lightmap XML")
     
@@ -669,107 +1182,412 @@ def main():
         print(f"可用场景: {', '.join(GlobalParameter.ALL_LIGHT_MAP_DATA.keys())}")
         return
     
-    # 获取场景配置
-    scene_config = GlobalParameter.ALL_LIGHT_MAP_DATA[scene_name]
+    # 初始化调试文件
+    debug_filename = init_debug_file(scene_name)
     
-    # 获取路径信息
-    xml_folder_path = scene_config["source_scene_xml_folder_path"]
-    json_path = scene_config["source_lightmap_json_path"]
-    output_path = scene_config["lightmap_data_ast_path_in_chaos"]
-    lightmap_path = scene_config["lightmap_path_in_chaos_assets"]
-
-    print(f"\n处理场景: {scene_name}")
-    print(f"XML文件夹路径: {xml_folder_path}")
-    print(f"JSON文件路径: {json_path}")
-    print(f"输出文件路径: {output_path}")
-    print(f"光照图路径: {lightmap_path}\n")
-    
-    # 获取XML文件列表
-    xml_files = []
     try:
-        # 如果是测试模式，直接使用测试XML文件
-        if args.test_mode:
-            xml_files = ["test_scene.xml"]
-        else:
-            # 从文件夹中获取所有.ast文件
-            for file in os.listdir(xml_folder_path):
-                if file.endswith('.ast'):
-                    xml_files.append(os.path.join(xml_folder_path, file))
-    except Exception as e:
-        print(f"读取XML文件夹失败: {str(e)}")
-        return
-    
-    if not xml_files:
-        print(f"未在{xml_folder_path}找到任何.ast或.xml文件")
-        return
-    
-    print(f"找到 {len(xml_files)} 个XML文件需要处理")
-    
-    # 读取JSON物体
-    json_objects = read_json_objects(json_path)
-    if not json_objects:
-        print("未能从JSON中读取物体，程序退出")
-        return
-    
-    # 收集所有XML物体
-    all_xml_objects = {}
-    for xml_file in xml_files:
-        print(f"\n处理XML文件: {xml_file}")
-        xml_objects = read_xml_objects(xml_file)
-        all_xml_objects.update(xml_objects)
-    
-    print(f"\n所有XML文件中共找到 {len(all_xml_objects)} 个物体")
-    
-    all_matches = []
-    
-    if args.force_match:
-        # 强制匹配模式：仅使用精确字符串匹配
-        print("\n启用强制匹配模式，仅使用精确字符串匹配...")
+        # 获取场景配置
+        scene_config = GlobalParameter.ALL_LIGHT_MAP_DATA[scene_name]
         
-        for xml_name, xml_obj in all_xml_objects.items():
-            # 检查是否有精确匹配的JSON对象键名
-            if xml_name in json_objects:
-                all_matches.append({
-                    "xml_name": xml_name,
-                    "json_name": xml_name,
-                    "data_ref": xml_obj["data_ref"],
-                    "lightmap_data": json_objects[xml_name]["lightmap"]
-                })
-                print(f"强制精确匹配: XML物体 '{xml_name}' 与 JSON物体 '{xml_name}'")
+        # 获取路径信息
+        xml_folder_path = scene_config["source_scene_xml_folder_path"]
+        json_path = scene_config["source_lightmap_json_path"]
+        output_path = scene_config["lightmap_data_ast_path_in_chaos"]
+        lightmap_path = scene_config["lightmap_path_in_chaos_assets"]
+
+        print(f"\n处理场景: {scene_name}")
+        print(f"XML文件夹路径: {xml_folder_path}")
+        print(f"JSON文件路径: {json_path}")
+        print(f"输出文件路径: {output_path}")
+        print(f"光照图路径: {lightmap_path}")
+        print(f"调试日志文件: {debug_filename}\n")
         
-        # 统计未匹配的物体
-        matched_xml_names = [m["xml_name"] for m in all_matches]
-        unmatched_xml = {name: obj for name, obj in all_xml_objects.items() if name not in matched_xml_names}
-        print(f"\n强制匹配模式下，精确匹配成功 {len(all_matches)} 个物体，仍有 {len(unmatched_xml)} 个物体未匹配")
-    else:
-        # 常规匹配模式：处理每个XML文件
+        debug_print(f"开始处理场景: {scene_name}")
+        debug_print(f"XML文件夹路径: {xml_folder_path}")
+        debug_print(f"JSON文件路径: {json_path}")
+        debug_print(f"输出文件路径: {output_path}")
+        debug_print(f"光照图路径: {lightmap_path}")
+        
+        # 获取XML文件列表
+        xml_files = []
+        try:
+            # 如果是测试模式，直接使用测试XML文件
+            if args.test_mode:
+                xml_files = ["test_scene.xml"]
+            else:
+                # 从文件夹中获取所有.ast文件
+                for file in os.listdir(xml_folder_path):
+                    if file.endswith('.ast'):
+                        xml_files.append(os.path.join(xml_folder_path, file))
+        except Exception as e:
+            print(f"读取XML文件夹失败: {str(e)}")
+            return
+        
+        if not xml_files:
+            print(f"未在{xml_folder_path}找到任何.ast或.xml文件")
+            return
+        
+        print(f"找到 {len(xml_files)} 个XML文件需要处理")
+        
+        # 读取JSON物体
+        json_objects = read_json_objects(json_path)
+        if not json_objects:
+            print("未能从JSON中读取物体，程序退出")
+            return
+        
+        # 收集所有XML物体
+        all_xml_objects = {}
+        xml_file_objects = {}  # 记录每个文件的物体，用于详细分析
         for xml_file in xml_files:
             print(f"\n处理XML文件: {xml_file}")
-            
-            # 读取XML物体
             xml_objects = read_xml_objects(xml_file)
-            if not xml_objects:
-                print(f"未能从{xml_file}中读取物体，跳过此文件")
-                continue
+            xml_file_objects[xml_file] = xml_objects
+            all_xml_objects.update(xml_objects)
+        
+        print(f"\n所有XML文件中共找到 {len(all_xml_objects)} 个物体")
+        
+        all_matches = []
+        all_unmatched_xml = {}
+        all_unmatched_json = {}
+        file_match_details = {}  # 记录每个文件的匹配详情
+        
+        # 目标物体名称
+        target_object_name = "objects_environment_buildings_wall_SSLM_citywall01_SSLM_citywall01_part_B_connect_01_lod0_mesh_ast_76"
+        
+        if args.force_match:
+            # 强制匹配模式：仅使用精确字符串匹配
+            print("\n启用强制匹配模式，仅使用精确字符串匹配...")
             
-            # 匹配物体
-            file_matches = match_objects(xml_objects, json_objects)
-            if not file_matches:
-                print(f"在{xml_file}中未找到匹配的物体，跳过此文件")
-                continue
+            for xml_name, xml_obj in all_xml_objects.items():
+                # 检查是否有精确匹配的JSON对象键名
+                if xml_name in json_objects:
+                    all_matches.append({
+                        "xml_name": xml_name,
+                        "json_name": xml_name,
+                        "data_ref": xml_obj["data_ref"],
+                        "lightmap_data": json_objects[xml_name]["lightmap"]
+                    })
+                    print(f"强制精确匹配: XML物体 '{xml_name}' 与 JSON物体 '{xml_name}'")
             
-            all_matches.extend(file_matches)
+            # 统计未匹配的物体
+            matched_xml_names = [m["xml_name"] for m in all_matches]
+            matched_json_names = [m["json_name"] for m in all_matches]
+            all_unmatched_xml = {name: obj for name, obj in all_xml_objects.items() if name not in matched_xml_names}
+            all_unmatched_json = {name: obj for name, obj in json_objects.items() if name not in matched_json_names}
+            
+            print(f"\n强制匹配模式下，精确匹配成功 {len(all_matches)} 个物体，仍有 {len(all_unmatched_xml)} 个物体未匹配")
+            
+        else:
+            # 常规匹配模式：处理每个XML文件
+            for xml_file in xml_files:
+                print(f"\n处理XML文件: {xml_file}")
+                
+                # 读取XML物体
+                xml_objects = xml_file_objects[xml_file]
+                if not xml_objects:
+                    print(f"未能从{xml_file}中读取物体，跳过此文件")
+                    file_match_details[xml_file] = {
+                        "matches": [],
+                        "unmatched_xml": {},
+                        "unmatched_json": {},
+                        "status": "无物体数据"
+                    }
+                    continue
+                
+                # 匹配物体
+                file_matches, unmatched_xml, unmatched_json = match_objects(xml_objects, json_objects)
+                file_match_details[xml_file] = {
+                    "matches": file_matches,
+                    "unmatched_xml": unmatched_xml,
+                    "unmatched_json": unmatched_json,
+                    "status": f"匹配{len(file_matches)}个物体" if file_matches else "无匹配物体"
+                }
+                
+                if not file_matches:
+                    print(f"在{xml_file}中未找到匹配的物体，跳过此文件")
+                    continue
+                
+                all_matches.extend(file_matches)
+            
+            # 收集所有未匹配的物体
+            all_unmatched_xml, all_unmatched_json = collect_all_unmatched_objects(xml_files, json_objects)
+        
+        if not all_matches:
+            print("未找到任何匹配的物体，程序退出")
+            return
+        
+        print(f"\n所有文件处理完成，共找到 {len(all_matches)} 个匹配物体")
+        
+        # 从JSON中提取地形数据
+        terrain_data = None
+        try:
+            print("\n开始提取地形数据...")
+            # 重新读取完整的JSON数据以提取地形信息
+            with open(json_path, 'r', encoding='utf-8') as f:
+                full_json_data = json.load(f)
+            
+            terrain_data = extract_terrain_data_from_json(full_json_data)
+            if terrain_data:
+                print(f"成功提取地形数据: {terrain_data['combine_name']}")
+                debug_print(f"地形数据: combine_name={terrain_data['combine_name']}")
+                debug_print(f"地形CoefScale: {terrain_data['lightmap_coef_scale']}")
+                debug_print(f"地形CoefAdd: {terrain_data['lightmap_coef_add']}")
+            else:
+                print("未找到地形数据，将仅处理静态物体")
+                debug_print("未找到地形数据")
+        except Exception as e:
+            print(f"提取地形数据时出错: {str(e)}")
+            debug_print(f"提取地形数据时出错: {str(e)}")
+            terrain_data = None
+        
+        # 创建或更新lightmap XML，包含地形数据
+        create_or_update_lightmap_xml(all_matches, output_path, lightmap_path, args.overwrite_all, terrain_data, scene_config)
+        
+        # 生成最终的完整调试报告
+        generate_final_debug_report(
+            xml_files, 
+            xml_file_objects, 
+            json_objects, 
+            all_matches, 
+            all_unmatched_xml, 
+            all_unmatched_json, 
+            file_match_details,
+            target_object_name,
+            args.force_match
+        )
+        
+        print("处理完成!")
+        print(f"详细调试信息已保存到: {debug_filename}")
+        
+    finally:
+        # 确保调试文件被关闭
+        close_debug_file()
+
+def generate_final_debug_report(xml_files, xml_file_objects, json_objects, all_matches, 
+                               all_unmatched_xml, all_unmatched_json, file_match_details,
+                               target_object_name, force_match_mode):
+    """
+    生成最终的完整调试报告
     
-    if not all_matches:
-        print("未找到任何匹配的物体，程序退出")
-        return
+    Args:
+        xml_files: 所有XML文件列表
+        xml_file_objects: 每个XML文件的物体数据
+        json_objects: JSON物体数据
+        all_matches: 所有匹配的物体
+        all_unmatched_xml: 所有未匹配的XML物体
+        all_unmatched_json: 所有未匹配的JSON物体
+        file_match_details: 每个文件的匹配详情
+        target_object_name: 目标物体名称
+        force_match_mode: 是否为强制匹配模式
+    """
+    debug_print("\n" + "="*100)
+    debug_print("                         最终完整调试报告")
+    debug_print("="*100)
     
-    print(f"\n所有文件处理完成，共找到 {len(all_matches)} 个匹配物体")
+    # 报告概要
+    debug_print(f"\n### 处理概要 ###")
+    debug_print(f"匹配模式: {'强制匹配' if force_match_mode else '常规匹配'}")
+    debug_print(f"处理的XML文件数量: {len(xml_files)}")
+    debug_print(f"XML中总物体数量: {sum(len(objs) for objs in xml_file_objects.values())}")
+    debug_print(f"JSON中总物体数量: {len(json_objects)}")
+    debug_print(f"成功匹配的物体数量: {len(all_matches)}")
+    debug_print(f"XML中未匹配物体数量: {len(all_unmatched_xml)}")
+    debug_print(f"JSON中未匹配物体数量: {len(all_unmatched_json)}")
     
-    # 创建或更新lightmap XML
-    create_or_update_lightmap_xml(all_matches, output_path, lightmap_path, args.overwrite_all)
+    # 各文件处理详情
+    debug_print(f"\n### 各XML文件处理详情 ###")
+    debug_print("-" * 80)
+    for i, xml_file in enumerate(xml_files, 1):
+        xml_objects = xml_file_objects.get(xml_file, {})
+        details = file_match_details.get(xml_file, {})
+        
+        debug_print(f"\n{i:2d}. 文件: {os.path.basename(xml_file)}")
+        debug_print(f"    完整路径: {xml_file}")
+        debug_print(f"    物体数量: {len(xml_objects)}")
+        debug_print(f"    处理状态: {details.get('status', '未知')}")
+        
+        if xml_objects:
+            # 显示前5个物体名称作为示例
+            object_names = list(xml_objects.keys())
+            debug_print(f"    示例物体名称:")
+            for j, name in enumerate(object_names[:5], 1):
+                debug_print(f"      {j}. {name}")
+            if len(object_names) > 5:
+                debug_print(f"      ... 还有 {len(object_names) - 5} 个物体")
     
-    print("处理完成!")
+    # 成功匹配的物体详情
+    debug_print(f"\n### 成功匹配的物体详情 (共{len(all_matches)}个) ###")
+    debug_print("-" * 80)
+    if all_matches:
+        for i, match in enumerate(all_matches, 1):
+            debug_print(f"\n{i:4d}. XML物体: {match['xml_name']}")
+            debug_print(f"      JSON物体: {match['json_name']}")
+            debug_print(f"      data_ref: {match.get('data_ref', 'N/A')}")
+            
+            # 显示光照图数据概要
+            lightmap_data = match.get('lightmap_data', {})
+            if lightmap_data:
+                debug_print(f"      光照图数据:")
+                for key, value in lightmap_data.items():
+                    if isinstance(value, list):
+                        debug_print(f"        {key}: [列表，{len(value)}个元素] {value[:4] if len(value) > 4 else value}{'...' if len(value) > 4 else ''}")
+                    else:
+                        debug_print(f"        {key}: {value}")
+            else:
+                debug_print(f"      光照图数据: 空")
+            
+            # 特别标记目标物体
+            if target_object_name and target_object_name in match['xml_name']:
+                debug_print(f"      *** 这是目标物体! ***")
+    else:
+        debug_print("无匹配物体")
+    
+    # XML中未匹配的物体详情
+    debug_print(f"\n### XML中未匹配的物体详情 (共{len(all_unmatched_xml)}个) ###")
+    debug_print("-" * 80)
+    if all_unmatched_xml:
+        for i, (xml_name, xml_obj) in enumerate(sorted(all_unmatched_xml.items()), 1):
+            debug_print(f"\n{i:4d}. {xml_name}")
+            debug_print(f"      position: {xml_obj.get('position', 'N/A')}")
+            debug_print(f"      data_ref: {xml_obj.get('data_ref', 'N/A')}")
+            
+            # 检查是否是目标物体
+            if target_object_name and target_object_name in xml_name:
+                debug_print(f"      *** 这是目标物体! ***")
+            
+            # 尝试在JSON中找到相似的名称
+            similar_json_names = []
+            for json_name in json_objects.keys():
+                if xml_name in json_name or json_name in xml_name:
+                    similar_json_names.append(json_name)
+            
+            if similar_json_names:
+                debug_print(f"      可能的JSON匹配项:")
+                for similar_name in similar_json_names[:3]:  # 最多显示3个
+                    debug_print(f"        - {similar_name}")
+                if len(similar_json_names) > 3:
+                    debug_print(f"        ... 还有 {len(similar_json_names) - 3} 个相似项")
+    else:
+        debug_print("无未匹配的XML物体")
+    
+    # JSON中未匹配的物体详情
+    debug_print(f"\n### JSON中未匹配的物体详情 (共{len(all_unmatched_json)}个) ###")
+    debug_print("-" * 80)
+    if all_unmatched_json:
+        for i, (json_name, json_obj) in enumerate(sorted(all_unmatched_json.items()), 1):
+            debug_print(f"\n{i:4d}. {json_name}")
+            debug_print(f"      position: {json_obj.get('position', 'N/A')}")
+            
+            # 显示光照图数据概要
+            lightmap_data = json_obj.get('lightmap', {})
+            if lightmap_data:
+                debug_print(f"      光照图数据:")
+                for key, value in lightmap_data.items():
+                    if isinstance(value, list):
+                        debug_print(f"        {key}: [列表，{len(value)}个元素]")
+                    else:
+                        debug_print(f"        {key}: {value}")
+            else:
+                debug_print(f"      光照图数据: 空")
+            
+            # 检查是否包含目标物体名称的一部分
+            if target_object_name and (target_object_name in json_name or json_name in target_object_name):
+                debug_print(f"      *** 可能是目标物体的匹配项! ***")
+            
+            # 尝试在XML中找到相似的名称
+            similar_xml_names = []
+            for xml_name in all_unmatched_xml.keys():
+                if json_name in xml_name or xml_name in json_name:
+                    similar_xml_names.append(xml_name)
+            
+            if similar_xml_names:
+                debug_print(f"      可能的XML匹配项:")
+                for similar_name in similar_xml_names[:3]:  # 最多显示3个
+                    debug_print(f"        - {similar_name}")
+                if len(similar_xml_names) > 3:
+                    debug_print(f"        ... 还有 {len(similar_xml_names) - 3} 个相似项")
+    else:
+        debug_print("无未匹配的JSON物体")
+    
+    # 目标物体特别分析
+    if target_object_name:
+        debug_print(f"\n### 目标物体 '{target_object_name}' 特别分析 ###")
+        debug_print("-" * 80)
+        
+        # 检查是否在匹配列表中
+        target_matched = False
+        for match in all_matches:
+            if target_object_name in match['xml_name']:
+                debug_print(f"✓ 目标物体已成功匹配!")
+                debug_print(f"  XML名称: {match['xml_name']}")
+                debug_print(f"  JSON名称: {match['json_name']}")
+                debug_print(f"  data_ref: {match.get('data_ref', 'N/A')}")
+                target_matched = True
+                break
+        
+        if not target_matched:
+            debug_print(f"✗ 目标物体未匹配")
+            
+            # 在XML中查找
+            xml_found = [name for name in all_unmatched_xml.keys() if target_object_name in name]
+            if xml_found:
+                debug_print(f"  在XML中找到 {len(xml_found)} 个相关物体:")
+                for name in xml_found:
+                    debug_print(f"    - {name}")
+            else:
+                debug_print(f"  在XML中未找到相关物体")
+            
+            # 在JSON中查找相似的
+            json_similar = []
+            for json_name in all_unmatched_json.keys():
+                # 计算相似度
+                target_parts = set(target_object_name.lower().split('_'))
+                json_parts = set(json_name.lower().split('_'))
+                common_parts = target_parts & json_parts
+                if len(common_parts) > 2:  # 至少有3个共同部分
+                    similarity = len(common_parts) / len(target_parts | json_parts)
+                    json_similar.append((json_name, similarity, common_parts))
+            
+            # 按相似度排序
+            json_similar.sort(key=lambda x: x[1], reverse=True)
+            
+            if json_similar:
+                debug_print(f"  在JSON中找到 {len(json_similar)} 个相似物体:")
+                for json_name, similarity, common_parts in json_similar[:5]:  # 显示前5个最相似的
+                    debug_print(f"    - {json_name} (相似度: {similarity:.2f}, 共同部分: {common_parts})")
+            else:
+                debug_print(f"  在JSON中未找到相似物体")
+    
+    # 匹配统计和建议
+    debug_print(f"\n### 匹配统计和建议 ###")
+    debug_print("-" * 80)
+    
+    total_xml_objects = sum(len(objs) for objs in xml_file_objects.values())
+    total_json_objects = len(json_objects)
+    
+    if total_xml_objects > 0:
+        xml_match_rate = len(all_matches) / total_xml_objects * 100
+        debug_print(f"XML物体匹配率: {xml_match_rate:.1f}% ({len(all_matches)}/{total_xml_objects})")
+    
+    if total_json_objects > 0:
+        json_match_rate = len(all_matches) / total_json_objects * 100
+        debug_print(f"JSON物体匹配率: {json_match_rate:.1f}% ({len(all_matches)}/{total_json_objects})")
+    
+    # 提供改进建议
+    debug_print(f"\n改进建议:")
+    if len(all_unmatched_xml) > 0 and len(all_unmatched_json) > 0:
+        debug_print(f"- 考虑实现模糊匹配算法，基于物体名称的相似度进行匹配")
+        debug_print(f"- 检查命名规范：大小写、下划线、特殊字符等")
+        debug_print(f"- 分析未匹配物体的命名模式，寻找规律")
+    
+    if len(all_unmatched_xml) > len(all_unmatched_json):
+        debug_print(f"- XML中未匹配物体较多，可能JSON数据不完整")
+    elif len(all_unmatched_json) > len(all_unmatched_xml):
+        debug_print(f"- JSON中未匹配物体较多，可能XML数据不完整或存在冗余")
+    
+    debug_print(f"\n" + "="*100)
+    debug_print("                         调试报告结束")
+    debug_print("="*100)
 
 if __name__ == "__main__":
     main() 
