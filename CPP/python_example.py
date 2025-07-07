@@ -109,6 +109,9 @@ class LightmapPackerPython:
         # 打包函数
         self.dll.PackLightmaps.argtypes = [ctypes.c_void_p]
         self.dll.PackLightmaps.restype = ctypes.c_bool
+
+        self.dll.PackSingleLightmap.argtypes = [ctypes.c_void_p]
+        self.dll.PackSingleLightmap.restype = ctypes.c_bool
         
         # 获取结果
         self.dll.GetTextureCount.argtypes = [ctypes.c_void_p]
@@ -148,6 +151,12 @@ class LightmapPackerPython:
             是否成功执行打包
         """
         return self.dll.PackLightmaps(self.instance)
+    
+    def pack_single_lightmap(self) -> bool:
+        """
+        执行单个灯光贴图打包
+        """
+        return self.dll.PackSingleLightmap(self.instance)
     
     def get_texture_count(self) -> int:
         """获取生成的纹理数量"""
