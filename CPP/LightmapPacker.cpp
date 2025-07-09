@@ -4,7 +4,6 @@
 #include <atomic>
 #include <chrono>
 #include <cstring>
-#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <future>
@@ -15,7 +14,6 @@
 #include <thread>
 #include <vector>
 
-namespace fs = std::filesystem;
 using std::vector;
 
 template <typename... Args> char *char_merge(const char *left, Args &&...args) {
@@ -679,6 +677,7 @@ public:
         scale *= 0.5f;
       }
     }
+    return true;
   }
 };
 

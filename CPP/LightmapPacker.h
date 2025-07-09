@@ -122,6 +122,13 @@ extern "C"
     LIGHTMAP_API bool PackLightmaps(void *packer);
 
     /**
+     * 打包单个灯光贴图 (将所有物体打包到一张图中)
+     * @param packer LightmapPacker
+     * @return 是否成功
+     */
+    LIGHTMAP_API bool PackSingleLightmap(void *packer);
+
+    /**
      * 获取打包的纹理数量
      * @param packer LightmapPacker
      * @return 打包的纹理数量
