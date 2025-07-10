@@ -1145,16 +1145,35 @@ def go_main(parser):
     lightmap_base_dir = scene_data.get("source_lightmap_texture_path")
     texture_size = scene_data.get("lightmap_texture_size", 2048)
     min_texture_size = scene_data.get("lightmap_texture_min_size", 16)
-    
+
     # 创建JSON备份文件夹
     json_dir = os.path.dirname(json_path)
     backup_dir = os.path.join(json_dir, "backup")
     os.makedirs(backup_dir, exist_ok=True)
-    
+
     # 备份或从备份读取JSON
     json_filename = os.path.basename(json_path)
     backup_json_path = os.path.join(backup_dir, json_filename)
-    
+
+    # 如果需要创建备份，先创建备份
+    if args.create_backup:
+        try:
+            if os.path.exists(json_path):
+                print(f"创建备份文件: {backup_json_path}")
+                import shutil
+                shutil.copy2(json_path, backup_json_path)
+                print("✓ 备份创建成功")
+                print("提示: 后续处理可以使用 --use-backup 参数从备份恢复")
+            else:
+                print(f"错误: 原始JSON文件不存在: {json_path}")
+                return
+        except Exception as e:
+            print(f"创建备份时出错: {e}")
+            return
+        
+        print(f"场景 '{args.scene}' 的备份已完成")
+
+    # 确定实际使用的JSON路径
     if args.use_backup:
         # 如果使用备份，检查备份是否存在
         if os.path.exists(backup_json_path):
@@ -1166,39 +1185,41 @@ def go_main(parser):
     else:
         # 使用原始路径
         source_json_path = json_path
-        
-        # 只有在指定了 --create-backup 时才创建备份
+
+    # 检查是否指定了处理选项
+    if not args.process_terrain and not args.process_staticmesh:
+        # 如果没有处理选项，但有create-backup，说明只是要创建备份
         if args.create_backup:
-            try:
-                if os.path.exists(json_path):
-                    print(f"备份JSON到: {backup_json_path}")
-                    import shutil
-                    shutil.copy2(json_path, backup_json_path)
-                    print("提示: 已创建备份，后续处理可以使用 --use-backup 参数从备份恢复")
-            except Exception as e:
-                print(f"备份JSON时出错: {e}")
+            print("仅创建备份完成，未进行资产处理")
+            return
         else:
-            print("提示: 未创建备份。如需备份原始JSON，请使用 --create-backup 参数")
-    
+            print("\n错误: 未指定任何处理选项")
+            print("请使用以下选项之一：")
+            print("  --process-terrain     处理地形的灯光贴图")
+            print("  --process-staticmesh  处理静态网格物体的灯光贴图")
+            print("  --create-backup       只创建JSON备份文件")
+            print("  --use-backup          从备份文件读取JSON")
+            return
+
     print(f"场景: {args.scene}")
     print(f"JSON路径: {source_json_path}")
     print(f"灯光贴图路径: {lightmap_base_dir}")
     print(f"纹理大小: {texture_size}")
     print(f"最小纹理大小: {min_texture_size}")
-    
+
     # 设置输出路径
     output_dir = os.path.join("./output/lightmaps", args.scene)
     os.makedirs(output_dir, exist_ok=True)
-    
+
     # 加载初始JSON数据
     json_data = load_json_data(source_json_path)
     modified = False
-    
+
     # 处理地形lightmap（如果启用）
     if args.process_terrain:
         terrain_success, json_data = process_terrain_lightmap(args, scene_data, json_data, source_json_path)
         modified = modified or terrain_success
-    
+
     # 处理静态网格物体（如果启用）
     if args.process_staticmesh:
         staticmesh_success, json_data = process_staticmesh_lightmap(args, scene_data, json_data, output_dir)
@@ -1209,10 +1230,6 @@ def go_main(parser):
         print(f"\n保存最终的JSON文件到: {json_path}")
         with open(json_path, 'w', encoding='utf-8') as f:
             json.dump(json_data, f, indent=4)
-    
-    # 如果没有选择任何处理选项，显示提示信息
-    if not args.process_terrain and not args.process_staticmesh:
-        print("\n警告: 未指定任何处理选项。请使用 --process-terrain 处理地形或 --process-staticmesh 处理静态网格物体。")
 
 def main():
     parser = argparse.ArgumentParser(description="混合架构灯光贴图打包工具")
@@ -1225,10 +1242,11 @@ def main():
     parser.add_argument("--use-backup", action="store_true",
                         help="从备份文件夹读取JSON，而不是从原始位置读取")
     parser.add_argument("--create-backup", action="store_true",
-                        help="创建原始JSON文件的备份（仅在首次处理时使用）")
+                        help="创建原始JSON文件的备份（可以与处理选项组合使用）")
 
     go_main(parser) 
 
 if __name__ == "__main__":
     main() 
+    
     
