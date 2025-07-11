@@ -1143,8 +1143,8 @@ def go_main(parser):
     # 获取各项参数
     json_path = scene_data.get("source_lightmap_json_path")
     lightmap_base_dir = scene_data.get("source_lightmap_texture_path")
-    texture_size = scene_data.get("lightmap_texture_size", 2048)
-    min_texture_size = scene_data.get("lightmap_texture_min_size", 16)
+    texture_size = scene_data.get("lightmap_texture_size")
+    min_texture_size = scene_data.get("lightmap_texture_min_size")
 
     # 创建JSON备份文件夹
     json_dir = os.path.dirname(json_path)
