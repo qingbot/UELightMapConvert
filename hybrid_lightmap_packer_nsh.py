@@ -492,16 +492,19 @@ def process_and_save_single_packed_texture(texture_result, rectangles, texture_i
         for mip_level in range(max_mip_level + 1):
             # 构建mip级别的文件路径
             if mip_level == 0:
-                # mip0就是原始文件
-                mip_lightmap_name = lightmap_lq
+                # mip0就是原始文件，没有_Mip_0后缀，但需要确保有.png扩展名
+                if lightmap_lq.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    mip_lightmap_name = lightmap_lq
+                else:
+                    mip_lightmap_name = f"{lightmap_lq}.png"
             else:
-                # mip1, mip2, etc.
+                # mip1, mip2, etc. 格式为：原始名_Mip_1.png
                 if lightmap_lq.lower().endswith(('.png', '.jpg', '.jpeg')):
                     # 如果已经有扩展名，在扩展名前插入mip后缀
                     name_without_ext = os.path.splitext(lightmap_lq)[0]
                     mip_lightmap_name = f"{name_without_ext}_Mip_{mip_level}.png"
                 else:
-                    # 如果没有扩展名，直接添加mip后缀
+                    # 如果没有扩展名，直接添加mip后缀和.png
                     mip_lightmap_name = f"{lightmap_lq}_Mip_{mip_level}.png"
             
             # 获取完整的灯光贴图路径
@@ -718,16 +721,19 @@ def process_and_save_packed_textures(results, group_rectangles, texture_size=409
             for mip_level in range(max_mip_level + 1):
                 # 构建mip级别的文件路径
                 if mip_level == 0:
-                    # mip0就是原始文件
-                    mip_lightmap_name = lightmap_lq
+                    # mip0就是原始文件，没有_Mip_0后缀，但需要确保有.png扩展名
+                    if lightmap_lq.lower().endswith(('.png', '.jpg', '.jpeg')):
+                        mip_lightmap_name = lightmap_lq
+                    else:
+                        mip_lightmap_name = f"{lightmap_lq}.png"
                 else:
-                    # mip1, mip2, etc.
+                    # mip1, mip2, etc. 格式为：原始名_Mip_1.png
                     if lightmap_lq.lower().endswith(('.png', '.jpg', '.jpeg')):
                         # 如果已经有扩展名，在扩展名前插入mip后缀
                         name_without_ext = os.path.splitext(lightmap_lq)[0]
                         mip_lightmap_name = f"{name_without_ext}_Mip_{mip_level}.png"
                     else:
-                        # 如果没有扩展名，直接添加mip后缀
+                        # 如果没有扩展名，直接添加mip后缀和.png
                         mip_lightmap_name = f"{lightmap_lq}_Mip_{mip_level}.png"
                 
                 # 获取完整的灯光贴图路径
@@ -1277,7 +1283,11 @@ def go_main(parser):
     max_mip_level = scene_data.get("max_mip_level", 0)
     print(f"Mip级别: {max_mip_level + 1} 级 (mip0 到 mip{max_mip_level})")
     if max_mip_level > 0:
-        print("  将生成以下mip级别文件:")
+        print("  源文件命名规则:")
+        print("    mip0: 原始文件名.png (如: lightmap_123.png)")
+        for level in range(1, max_mip_level + 1):
+            print(f"    mip{level}: 原始文件名_Mip_{level}.png (如: lightmap_123_Mip_{level}.png)")
+        print("  输出文件命名:")
         for level in range(max_mip_level + 1):
             if level == 0:
                 print(f"    mip{level}: packed_lightmap_X.png (原始分辨率)")
