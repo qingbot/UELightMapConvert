@@ -1195,16 +1195,54 @@ def process_staticmesh_lightmap(args, scene_data, json_data, output_dir):
         return False, json_data
 
 
+def create_backup_file(json_path, backup_dir, backup_filename=None):
+    """创建备份文件的通用函数
+    
+    Args:
+        json_path: 原始JSON文件路径
+        backup_dir: 备份目录
+        backup_filename: 自定义备份文件名，如果为None则使用原始文件名
+        
+    Returns:
+        备份文件路径，如果失败则返回None
+    """
+    try:
+        if not os.path.exists(json_path):
+            print(f"错误: 原始JSON文件不存在: {json_path}")
+            return None
+        
+        # 确定备份文件名
+        if backup_filename:
+            # 如果指定了自定义文件名，使用该文件名
+            backup_json_path = os.path.join(backup_dir, backup_filename)
+            print(f"使用自定义备份文件名: {backup_filename}")
+        else:
+            # 使用原始文件名
+            json_filename = os.path.basename(json_path)
+            backup_json_path = os.path.join(backup_dir, json_filename)
+            print(f"使用默认备份文件名: {json_filename}")
+        
+        print(f"创建备份文件: {backup_json_path}")
+        import shutil
+        shutil.copy2(json_path, backup_json_path)
+        print("✓ 备份创建成功")
+        return backup_json_path
+    except Exception as e:
+        print(f"创建备份时出错: {e}")
+        return None
+
 def go_main(parser):
     args = parser.parse_args()
     
     # 检查参数冲突
     if args.use_backup and args.create_backup:
         print("错误: --use-backup 和 --create-backup 参数不能同时使用")
-        print("  --use-backup: 从备份文件读取JSON")
-        print("  --create-backup: 创建原始JSON文件的备份")
+        print("  --use-backup: 从备份文件读取JSON（可指定备份文件名）")
+        print("  --create-backup: 创建原始JSON文件的备份（可指定备份文件名）")
         print("请选择其中一个参数使用")
         return
+    
+
     
     # 从GlobalParameter获取场景相关参数
     scene_data = GlobalParameter.ALL_LIGHT_MAP_DATA.get(args.scene, {})
@@ -1229,31 +1267,43 @@ def go_main(parser):
 
     # 如果需要创建备份，先创建备份
     if args.create_backup:
-        try:
-            if os.path.exists(json_path):
-                print(f"创建备份文件: {backup_json_path}")
-                import shutil
-                shutil.copy2(json_path, backup_json_path)
-                print("✓ 备份创建成功")
-                print("提示: 后续处理可以使用 --use-backup 参数从备份恢复")
-            else:
-                print(f"错误: 原始JSON文件不存在: {json_path}")
-                return
-        except Exception as e:
-            print(f"创建备份时出错: {e}")
-            return
+        # 确定备份文件名
+        if args.create_backup is True:
+            backup_filename = None  # 使用默认文件名
+            print(f"创建默认备份文件")
+        else:
+            backup_filename = args.create_backup  # 使用指定文件名
+            print(f"创建指定备份文件: {backup_filename}")
         
+        backup_result = create_backup_file(json_path, backup_dir, backup_filename)
+        if backup_result is None:
+            return
+        # 如果指定了自定义文件名，更新backup_json_path
+        if backup_filename:
+            backup_json_path = backup_result
         print(f"场景 '{args.scene}' 的备份已完成")
+        print("提示: 后续处理可以使用 --use-backup 参数从备份恢复")
 
     # 确定实际使用的JSON路径
     if args.use_backup:
-        # 如果使用备份，检查备份是否存在
-        if os.path.exists(backup_json_path):
-            print(f"从备份读取JSON: {backup_json_path}")
-            source_json_path = backup_json_path
+        # 确定备份文件路径
+        if args.use_backup is True:
+            # 如果只有 --use-backup 没有参数，使用默认备份文件名
+            actual_backup_path = backup_json_path
+            print(f"使用默认备份文件: {os.path.basename(actual_backup_path)}")
         else:
-            print(f"警告: 备份文件不存在 {backup_json_path}，使用原始JSON")
-            source_json_path = json_path
+            # 如果指定了备份文件名，使用指定的文件名
+            actual_backup_path = os.path.join(backup_dir, args.use_backup)
+            print(f"使用指定备份文件: {args.use_backup}")
+        
+        # 检查备份文件是否存在
+        if os.path.exists(actual_backup_path):
+            print(f"从备份读取JSON: {actual_backup_path}")
+            source_json_path = actual_backup_path
+        else:
+            print(f"错误: 指定的备份文件不存在: {actual_backup_path}")
+            print(f"请检查备份文件是否正确，或使用 --create-backup 创建备份")
+            return
     else:
         # 使用原始路径
         source_json_path = json_path
@@ -1269,9 +1319,23 @@ def go_main(parser):
             print("请使用以下选项之一：")
             print("  --process-terrain     处理地形的灯光贴图")
             print("  --process-staticmesh  处理静态网格物体的灯光贴图")
-            print("  --create-backup       只创建JSON备份文件")
-            print("  --use-backup          从备份文件读取JSON")
+            print("  --create-backup       只创建JSON备份文件（可指定备份文件名）")
+            print("  --use-backup          从备份文件读取JSON（可指定备份文件名）")
             return
+
+    # 如果需要进行处理操作，检查备份文件是否存在，如果不存在则自动创建
+    if (args.process_terrain or args.process_staticmesh) and not args.use_backup:
+        # 检查备份文件是否存在
+        if not os.path.exists(backup_json_path):
+            print(f"⚠️  检测到没有备份文件，正在自动创建备份...")
+            backup_result = create_backup_file(json_path, backup_dir)
+            if backup_result is None:
+                print("❌ 无法创建备份文件，为了安全起见，停止处理")
+                return
+            print("✓ 自动备份创建成功")
+            print("提示: 后续处理可以使用 --use-backup 参数从备份恢复")
+        else:
+            print(f"✓ 发现已存在备份文件: {backup_json_path}")
 
     print(f"场景: {args.scene}")
     print(f"JSON路径: {source_json_path}")
@@ -1328,10 +1392,10 @@ def main():
                         help="处理地形的灯光贴图")
     parser.add_argument("--process-staticmesh", action="store_true",
                         help="处理场景中静态网格物体的灯光贴图")
-    parser.add_argument("--use-backup", action="store_true",
-                        help="从备份文件夹读取JSON，而不是从原始位置读取")
-    parser.add_argument("--create-backup", action="store_true",
-                        help="创建原始JSON文件的备份（可以与处理选项组合使用）")
+    parser.add_argument("--use-backup", nargs='?', const=True, default=False,
+                        help="从备份文件夹读取JSON，而不是从原始位置读取。可指定备份文件名，如果不指定则使用默认备份")
+    parser.add_argument("--create-backup", nargs='?', const=True, default=False,
+                        help="创建原始JSON文件的备份（可以与处理选项组合使用）。可指定备份文件名，如果不指定则使用原始文件名")
 
     go_main(parser) 
 
