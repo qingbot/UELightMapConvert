@@ -11,7 +11,7 @@ debug_file = None
 
 def debug_print(message, also_console=True):
     """打印调试信息到文件和控制台"""
-    global debug_file
+    global debug_file 
     if debug_file:
         debug_file.write(str(message) + '\n')
         debug_file.flush()  # 立即写入文件

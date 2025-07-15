@@ -92,6 +92,276 @@ def get_mesh_id_by_rect_id(rect_id):
         return info["mesh_id"] if isinstance(info, dict) and "mesh_id" in info else None
     return None
 
+def parse_grid_key(grid_key):
+    """解析格子键为坐标
+    
+    Args:
+        grid_key: 格子键，格式为 "grid_x_y"
+        
+    Returns:
+        (grid_x, grid_y) 坐标元组，如果解析失败返回None
+    """
+    try:
+        parts = grid_key.split('_')
+        if len(parts) == 3 and parts[0] == 'grid':
+            grid_x = int(parts[1])
+            grid_y = int(parts[2])
+            return (grid_x, grid_y)
+    except ValueError:
+        pass
+    return None
+
+def create_grid_key(grid_x, grid_y):
+    """根据坐标创建格子键
+    
+    Args:
+        grid_x: x坐标
+        grid_y: y坐标
+        
+    Returns:
+        格子键字符串
+    """
+    return f"grid_{grid_x}_{grid_y}"
+
+def organize_grids_by_mip_levels(groups, max_mip_level):
+    """按位置组织grid为不同mip级别的合并组
+    
+    Args:
+        groups: 原始的grid组织结构 {grid_key: items}
+        max_mip_level: 最大mip级别
+        
+    Returns:
+        字典，包含每个mip级别的组织信息
+        {
+            0: {grid_key: {'grids': [grid_key], 'index': 0}},  # mip0保持原样
+            1: {merge_key: {'grids': [grid_keys], 'index': merge_index}},  # mip1: 2x2合并
+            2: {merge_key: {'grids': [grid_keys], 'index': merge_index}},  # mip2: 4x4合并
+        }
+    """
+    mip_organizations = {}
+    
+    # 解析所有grid坐标
+    grid_coords = {}
+    for grid_key in groups.keys():
+        coord = parse_grid_key(grid_key)
+        if coord:
+            grid_coords[grid_key] = coord
+    
+    if not grid_coords:
+        print("警告: 没有找到有效的grid坐标")
+        return mip_organizations
+    
+    # 计算边界
+    all_x = [coord[0] for coord in grid_coords.values()]
+    all_y = [coord[1] for coord in grid_coords.values()]
+    min_x, max_x = min(all_x), max(all_x)
+    min_y, max_y = min(all_y), max(all_y)
+    
+    print(f"Grid边界: x=[{min_x}, {max_x}], y=[{min_y}, {max_y}]")
+    
+    # mip0: 保持原样，每个grid独立
+    mip_organizations[0] = {}
+    index = 0
+    for y in range(min_y, max_y + 1):
+        for x in range(min_x, max_x + 1):
+            grid_key = create_grid_key(x, y)
+            if grid_key in groups:
+                mip_organizations[0][grid_key] = {
+                    'grids': [grid_key],
+                    'index': index
+                }
+                index += 1
+    
+    # 为每个mip级别创建合并组
+    for mip_level in range(1, max_mip_level + 1):
+        mip_organizations[mip_level] = {}
+        merge_size = 2 ** mip_level  # mip1=2x2, mip2=4x4
+        
+        merge_index = 0
+        
+        # 从左下角开始，按merge_size的块遍历
+        for base_y in range(min_y, max_y + 1, merge_size):
+            for base_x in range(min_x, max_x + 1, merge_size):
+                # 收集当前块内的所有grid
+                grids_in_block = []
+                for dy in range(merge_size):
+                    for dx in range(merge_size):
+                        grid_x = base_x + dx
+                        grid_y = base_y + dy
+                        grid_key = create_grid_key(grid_x, grid_y)
+                        if grid_key in groups:
+                            grids_in_block.append(grid_key)
+                
+                # 如果块内有任何grid，创建合并项
+                if grids_in_block:
+                    merge_key = f"mip{mip_level}_merge_{base_x}_{base_y}"
+                    mip_organizations[mip_level][merge_key] = {
+                        'grids': grids_in_block,
+                        'index': merge_index,
+                        'base_x': base_x,
+                        'base_y': base_y,
+                        'merge_size': merge_size
+                    }
+                    merge_index += 1
+    
+    # 打印组织结果
+    for mip_level in range(max_mip_level + 1):
+        count = len(mip_organizations[mip_level])
+        if mip_level == 0:
+            print(f"mip{mip_level}: {count} 个独立grid (输出: lightmap/packed_lightmap_X.png, dir/packed_lightmap_X_dir.png)")
+        else:
+            merge_size = 2 ** mip_level
+            print(f"mip{mip_level}: {count} 个 {merge_size}x{merge_size} 合并块 (输出: lightmap/packed_lightmap_mip{mip_level}_Y.png, dir/packed_lightmap_mip{mip_level}_Y_dir.png)")
+    
+    return mip_organizations
+
+def merge_grid_textures_for_mip(merge_info, grid_texture_paths, texture_size, is_dir=False):
+    """合并多个grid的纹理为一个mip级别的大纹理
+    
+    Args:
+        merge_info: 合并信息，包含'grids', 'base_x', 'base_y', 'merge_size'等
+        grid_texture_paths: 每个grid的纹理路径字典 {grid_key: texture_path}
+        texture_size: 单个纹理的尺寸
+        is_dir: 是否是方向纹理
+        
+    Returns:
+        合并后的纹理数组
+    """
+    grids = merge_info['grids']
+    base_x = merge_info['base_x']
+    base_y = merge_info['base_y']
+    merge_size = merge_info['merge_size']
+    
+    # 创建合并后的纹理（与原始纹理一样大）
+    merged_texture = np.zeros((texture_size, texture_size, 4), dtype=np.uint8)
+    
+    # 计算每个小纹理在合并纹理中的尺寸
+    cell_size = texture_size // merge_size
+    
+    # 遍历合并块中的每个位置
+    for dy in range(merge_size):
+        for dx in range(merge_size):
+            grid_x = base_x + dx
+            grid_y = base_y + dy
+            grid_key = create_grid_key(grid_x, grid_y)
+            
+            # 计算在合并纹理中的位置（从左下角开始）
+            target_x = dx * cell_size
+            target_y = (merge_size - 1 - dy) * cell_size  # 翻转Y坐标，因为从左下角开始
+            
+            if grid_key in grid_texture_paths:
+                # 加载并缩放纹理
+                texture_path = grid_texture_paths[grid_key]
+                try:
+                    img = Image.open(texture_path)
+                    img = img.resize((cell_size, cell_size), Image.NEAREST)
+                    texture_array = np.array(img)
+                    
+                    # 确保纹理有4个通道
+                    if texture_array.shape[2] == 3:
+                        # 如果是RGB，添加alpha通道
+                        alpha = np.ones((texture_array.shape[0], texture_array.shape[1], 1), dtype=np.uint8) * 255
+                        texture_array = np.concatenate([texture_array, alpha], axis=2)
+                    
+                    # 复制到合并纹理中
+                    merged_texture[target_y:target_y+cell_size, target_x:target_x+cell_size] = texture_array
+                    
+                except Exception as e:
+                    print(f"警告: 加载纹理 {texture_path} 时出错: {e}")
+                    # 用黑色填充
+                    merged_texture[target_y:target_y+cell_size, target_x:target_x+cell_size] = 0
+            else:
+                # 用黑色填充缺失的grid
+                merged_texture[target_y:target_y+cell_size, target_x:target_x+cell_size] = 0
+    
+    return merged_texture
+
+def create_and_save_merged_mip_textures(mip_organizations, groups, all_results, output_dir, texture_size, max_mip_level):
+    """创建并保存合并的mip纹理
+    
+    Args:
+        mip_organizations: 按mip级别组织的grid信息
+        groups: 原始grid组织结构
+        all_results: 所有的纹理结果
+        output_dir: 输出目录
+        texture_size: 纹理尺寸
+        max_mip_level: 最大mip级别
+        
+    Returns:
+        保存的文件路径列表
+    """
+    saved_paths = []
+    
+    # 创建lightmap和dir两个子文件夹
+    lightmap_dir = os.path.join(output_dir, "lightmap")
+    dir_dir = os.path.join(output_dir, "dir")
+    os.makedirs(lightmap_dir, exist_ok=True)
+    os.makedirs(dir_dir, exist_ok=True)
+    
+    # 创建grid到纹理路径的映射
+    grid_texture_paths = {}
+    for result in all_results:
+        texture_index = result.texture_index
+        
+        # 查找该纹理对应的grid
+        for grid_key, items in groups.items():
+            if any(rectangle_id_map.get(rect.rectangle_id, {}).get("mesh_id") in 
+                   [item["mesh_id"] for item in items] for rect in 
+                   [result.rectangles[i] for i in range(result.rectangle_count)]):
+                
+                # 只为mip0创建路径映射，中间的单独mip级别不再保存
+                # 使用新的文件夹结构：lightmap和dir分开存放
+                lq_path = os.path.join(output_dir, "lightmap", f"packed_lightmap_{texture_index}.png")
+                dir_path = os.path.join(output_dir, "dir", f"packed_lightmap_{texture_index}_dir.png")
+                
+                if 0 not in grid_texture_paths:
+                    grid_texture_paths[0] = {}
+                
+                grid_texture_paths[0][grid_key] = {
+                    'lq': lq_path,
+                    'dir': dir_path
+                }
+                break
+    
+    # 为每个mip级别创建合并纹理
+    for mip_level in range(1, max_mip_level + 1):  # 从mip1开始，mip0保持原样
+        if mip_level not in mip_organizations:
+            continue
+            
+        for merge_key, merge_info in mip_organizations[mip_level].items():
+            merge_index = merge_info['index']
+            
+            # 创建LQ合并纹理（基于mip0的纹理）
+            if 0 in grid_texture_paths:
+                lq_merged = merge_grid_textures_for_mip(
+                    merge_info, 
+                    {grid_key: paths['lq'] for grid_key, paths in grid_texture_paths[0].items()},
+                    texture_size, 
+                    is_dir=False
+                )
+                
+                # 保存LQ合并纹理到lightmap文件夹
+                lq_output_path = os.path.join(lightmap_dir, f"packed_lightmap_mip{mip_level}_{merge_index}.png")
+                Image.fromarray(lq_merged).save(lq_output_path)
+                saved_paths.append(lq_output_path)
+                print(f"已保存LQ合并纹理 mip{mip_level}: {lq_output_path}")
+                
+                # 创建Dir合并纹理（基于mip0的纹理）
+                dir_merged = merge_grid_textures_for_mip(
+                    merge_info, 
+                    {grid_key: paths['dir'] for grid_key, paths in grid_texture_paths[0].items()},
+                    texture_size, 
+                    is_dir=True
+                )
+                
+                # 保存Dir合并纹理到dir文件夹
+                dir_output_path = os.path.join(dir_dir, f"packed_lightmap_mip{mip_level}_{merge_index}_dir.png")
+                Image.fromarray(dir_merged).save(dir_output_path)
+                saved_paths.append(dir_output_path)
+                print(f"已保存Dir合并纹理 mip{mip_level}: {dir_output_path}")
+    
+    return saved_paths
+
 # 从ReCode_LQ.py提取的关键类和函数
 def get_new_json_path():
     """使用时间戳创建新的文件名"""
@@ -470,7 +740,7 @@ def process_and_save_single_packed_texture(texture_result, rectangles, texture_i
         texture_array_dir = np.zeros((mip_height, mip_width, 4), dtype=np.uint8)
         mip_textures_dir.append(texture_array_dir)
     
-    print(f"处理格子 '{grid_key}' 的纹理 {texture_index}，包含 {texture_result.rectangle_count} 个矩形，生成 {max_mip_level + 1} 个mip级别")
+    print(f"处理格子 '{grid_key}' 的纹理 {texture_index}，包含 {texture_result.rectangle_count} 个矩形，生成mip0纹理 (中间mip级别不再单独输出)")
     
     # 遍历该纹理中的所有矩形
     for i in range(texture_result.rectangle_count):
@@ -620,25 +890,24 @@ def process_and_save_single_packed_texture(texture_result, rectangles, texture_i
             "scale_factor": 1.0  # 默认缩放因子
         }
     
-    # 保存所有mip级别的打包纹理
-    for mip_level in range(max_mip_level + 1):
-        # 保存LQ纹理
-        if mip_level == 0:
-            output_path = os.path.join(output_dir, f"packed_lightmap_{texture_index}.png")
-        else:
-            output_path = os.path.join(output_dir, f"packed_lightmap_{texture_index}_Mip_{mip_level}.png")
-        
-        Image.fromarray(mip_textures_lq[mip_level]).save(output_path)
-        print(f"已保存LQ打包纹理 mip{mip_level}: {output_path}")
-        
-        # 保存Dir纹理
-        if mip_level == 0:
-            output_path_dir = os.path.join(output_dir, f"packed_lightmap_{texture_index}_dir.png")
-        else:
-            output_path_dir = os.path.join(output_dir, f"packed_lightmap_{texture_index}_dir_Mip_{mip_level}.png")
-        
-        Image.fromarray(mip_textures_dir[mip_level]).save(output_path_dir)
-        print(f"已保存Dir打包纹理 mip{mip_level}: {output_path_dir}")
+    # 创建lightmap和dir两个子文件夹
+    lightmap_dir = os.path.join(output_dir, "lightmap")
+    dir_dir = os.path.join(output_dir, "dir")
+    os.makedirs(lightmap_dir, exist_ok=True)
+    os.makedirs(dir_dir, exist_ok=True)
+    
+    # 只保存mip0的打包纹理，跳过中间的单独mip级别
+    # 保存LQ纹理 (mip0) 到lightmap文件夹
+    output_path = os.path.join(lightmap_dir, f"packed_lightmap_{texture_index}.png")
+    Image.fromarray(mip_textures_lq[0]).save(output_path)
+    print(f"已保存LQ打包纹理 mip0: {output_path}")
+    
+    # 保存Dir纹理 (mip0) 到dir文件夹
+    output_path_dir = os.path.join(dir_dir, f"packed_lightmap_{texture_index}_dir.png")
+    Image.fromarray(mip_textures_dir[0]).save(output_path_dir)
+    print(f"已保存Dir打包纹理 mip0: {output_path_dir}")
+    
+    # 中间的单独mip级别(mip1, mip2等)不再保存，只使用合并后的mip纹理
     
     return updated_lightmap_info
 
@@ -699,7 +968,7 @@ def process_and_save_packed_textures(results, group_rectangles, texture_size=409
     for texture_idx, texture_mip_levels in enumerate(packed_textures_mip):
         texture = results[texture_idx]
         texture_dir_mip_levels = packed_textures_dir_mip[texture_idx]  # 获取对应的Dir纹理信息
-        print(f"处理纹理 {texture.texture_index}，包含 {texture.rectangle_count} 个矩形，生成 {max_mip_level + 1} 个mip级别")
+        print(f"处理纹理 {texture.texture_index}，包含 {texture.rectangle_count} 个矩形，生成mip0纹理 (中间mip级别不再单独输出)")
         
         # 遍历该纹理中的所有矩形
         for i in range(texture.rectangle_count):
@@ -867,34 +1136,34 @@ def process_and_save_packed_textures(results, group_rectangles, texture_size=409
                 "scale_factor": 1.0  # 默认缩放因子
             }
     
-    # 保存所有mip级别的打包纹理
+    # 创建lightmap和dir两个子文件夹
+    lightmap_dir = os.path.join(output_dir, "lightmap")
+    dir_dir = os.path.join(output_dir, "dir")
+    os.makedirs(lightmap_dir, exist_ok=True)
+    os.makedirs(dir_dir, exist_ok=True)
+    
+    # 只保存mip0的打包纹理，跳过中间的单独mip级别
     saved_paths = []
     for texture_idx, texture_mip_levels in enumerate(packed_textures_mip):
         texture_dir_mip_levels = packed_textures_dir_mip[texture_idx]
         
-        for mip_level in range(max_mip_level + 1):
-            texture_info = texture_mip_levels[mip_level]
-            texture_dir_info = texture_dir_mip_levels[mip_level]
-            
-            # 保存LQ纹理
-            if mip_level == 0:
-                output_path = os.path.join(output_dir, f"packed_lightmap_{texture_info['texture_index']}.png")
-            else:
-                output_path = os.path.join(output_dir, f"packed_lightmap_{texture_info['texture_index']}_Mip_{mip_level}.png")
-            
-            Image.fromarray(texture_info["array"]).save(output_path)
-            saved_paths.append(output_path)
-            print(f"已保存LQ打包纹理 mip{mip_level}: {output_path}")
-            
-            # 保存Dir纹理
-            if mip_level == 0:
-                output_path_dir = os.path.join(output_dir, f"packed_lightmap_{texture_info['texture_index']}_dir.png")
-            else:
-                output_path_dir = os.path.join(output_dir, f"packed_lightmap_{texture_info['texture_index']}_dir_Mip_{mip_level}.png")
-            
-            Image.fromarray(texture_dir_info["array"]).save(output_path_dir)
-            saved_paths.append(output_path_dir)
-            print(f"已保存Dir打包纹理 mip{mip_level}: {output_path_dir}")
+        # 只保存mip0级别
+        texture_info = texture_mip_levels[0]
+        texture_dir_info = texture_dir_mip_levels[0]
+        
+        # 保存LQ纹理 (mip0) 到lightmap文件夹
+        output_path = os.path.join(lightmap_dir, f"packed_lightmap_{texture_info['texture_index']}.png")
+        Image.fromarray(texture_info["array"]).save(output_path)
+        saved_paths.append(output_path)
+        print(f"已保存LQ打包纹理 mip0: {output_path}")
+        
+        # 保存Dir纹理 (mip0) 到dir文件夹
+        output_path_dir = os.path.join(dir_dir, f"packed_lightmap_{texture_info['texture_index']}_dir.png")
+        Image.fromarray(texture_dir_info["array"]).save(output_path_dir)
+        saved_paths.append(output_path_dir)
+        print(f"已保存Dir打包纹理 mip0: {output_path_dir}")
+        
+        # 中间的单独mip级别(mip1, mip2等)不再保存，只使用合并后的mip纹理
     
     return updated_lightmap_info
 
@@ -1159,6 +1428,31 @@ def process_staticmesh_lightmap(args, scene_data, json_data, output_dir):
         step3_time = time.time() - step3_start_time
         print(f"步骤3: 执行贴图打包完成，耗时: {step3_time:.2f}秒")
         
+        # 步骤3.5: 创建按位置合并的mipmap（如果max_mip_level > 0）
+        step3_5_start_time = time.time()
+        if max_mip_level > 0:
+            print(f"\n开始创建按位置合并的mipmap...")
+            
+            # 组织grid为不同的mip级别
+            mip_organizations = organize_grids_by_mip_levels(groups, max_mip_level)
+            
+            # 创建并保存合并的mip纹理
+            merged_paths = create_and_save_merged_mip_textures(
+                mip_organizations, 
+                groups, 
+                all_results, 
+                bigmap_dir, 
+                texture_size, 
+                max_mip_level
+            )
+            
+            print(f"已创建 {len(merged_paths)} 个合并的mip纹理文件")
+        else:
+            print("跳过mipmap合并（max_mip_level = 0）")
+        
+        step3_5_time = time.time() - step3_5_start_time
+        print(f"步骤3.5: 创建合并mipmap完成，耗时: {step3_5_time:.2f}秒")
+        
         # 保存打包结果到JSON
         debug_output_path = os.path.join(output_dir, "packing_debug.json")
         save_packing_results_to_json(all_results, groups, debug_output_path)
@@ -1183,9 +1477,12 @@ def process_staticmesh_lightmap(args, scene_data, json_data, output_dir):
         print(f"- 准备JSON数据: {step1_time/total_time*100:.1f}%\t({step1_time:.2f}秒)")
         print(f"- 按空间分组: {step2_time/total_time*100:.1f}%\t({step2_time:.2f}秒)")
         print(f"- 执行贴图打包: {step3_time/total_time*100:.1f}%\t({step3_time:.2f}秒)")
+        print(f"- 创建合并mipmap: {step3_5_time/total_time*100:.1f}%\t({step3_5_time:.2f}秒)")
         print(f"- 更新JSON数据: {step4_time/total_time*100:.1f}%\t({step4_time:.2f}秒)")
         
         print(f"新的光照图文件保存在: {bigmap_dir}")
+        print(f"  - LQ纹理保存在: {os.path.join(bigmap_dir, 'lightmap')}")
+        print(f"  - Dir纹理保存在: {os.path.join(bigmap_dir, 'dir')}")
         
         return True, updated_json_data
         
@@ -1352,11 +1649,15 @@ def go_main(parser):
         for level in range(1, max_mip_level + 1):
             print(f"    mip{level}: 原始文件名_Mip_{level}.png (如: lightmap_123_Mip_{level}.png)")
         print("  输出文件命名:")
-        for level in range(max_mip_level + 1):
-            if level == 0:
-                print(f"    mip{level}: packed_lightmap_X.png (原始分辨率)")
-            else:
-                print(f"    mip{level}: packed_lightmap_X_Mip_{level}.png (1/{2**level} 分辨率)")
+        print("  文件夹结构:")
+        print("    lightmap/ - 存放所有LQ纹理")
+        print("    dir/ - 存放所有Dir纹理")
+        print("  文件命名:")
+        print(f"    mip0: lightmap/packed_lightmap_X.png, dir/packed_lightmap_X_dir.png (原始分辨率，每个格子独立)")
+        for level in range(1, max_mip_level + 1):
+            merge_size = 2 ** level
+            print(f"    mip{level}: lightmap/packed_lightmap_mip{level}_Y.png, dir/packed_lightmap_mip{level}_Y_dir.png (合并{merge_size}x{merge_size}格子)")
+        print("  注：中间的单独mip级别不再输出，只输出mip0和合并后的mip纹理")
     else:
         print("  仅生成单个分辨率的大图 (mip0)")
 

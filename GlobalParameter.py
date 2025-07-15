@@ -47,15 +47,16 @@ ALL_LIGHT_MAP_DATA = {
 
         # 合并为一张大纹理时，该纹理的最小大小
         "lightmap_texture_min_size" : 16,
+        # 合并为一张大纹理时，该纹理的最大mip级别,3表示有四个mip级别
         "max_mip_level" : 3,
 
-        # 场景的左下角在世界坐标系中的位置 对应chaos中的xy坐标, 以下俩构成了一个矩形对角线，这个矩形框定了场景的边界，尽量是正方形
+        # 场景的左下角在世界坐标系中的位置 对应虚幻中的xy坐标, 以下俩构成了一个矩形对角线，这个矩形框定了场景的边界，尽量是正方形
         "level_left_pos" : [-65000,-14010],
         # 场景的右上角在世界坐标系中的位置
         "level_right_pos" : [30000,100000], 
 
         # 各级lod的最远距离
-        "lod_distance" : [20000,40000,80000,160000],
+        "lod_distance" : [12500],
 
         "lightmap_absolute_path" : "D:/ev/dev/wolfgang/_games/proven_ground/_content/New Folder1/lightMaps",
         "original_lightmap_absolute_path" : "C:/chaos_integrated_tools/data_analysis/scene/light/light_map/BigLightmap"
