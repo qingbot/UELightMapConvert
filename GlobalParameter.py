@@ -28,7 +28,6 @@ ALL_LIGHT_MAP_DATA = {
         # 各级lod的最远距离
         "lod_distance" : [100,200,400,800],
 
-        ################################ 这俩暂时不用 #################################
         # CHAOS中Lightmap所在的绝对路径
         "lightmap_absolute_path" : "D:/ev/dev/wolfgang/_games/proven_ground/_content/New Folder1/lightMaps",
         # 原始lightmap所在的绝对路径
@@ -62,6 +61,53 @@ ALL_LIGHT_MAP_DATA = {
         "original_lightmap_absolute_path" : "C:/chaos_integrated_tools/data_analysis/scene/light/light_map/BigLightmap"
     },
 
+}
+
+'''
+chaos_texture_document.cs中的TextureSerializeModel
+
+    public const string TEXTURE_ID = "Texture_V2";
+    private class TextureSerializeModel
+    {
+        public int MipBias { get; set; }
+        public int CompressType { get; set; }
+        public int MipGenType { get; set; }
+        public uint MaxSize { get; set; }
+        public bool SRgb { get; set; }
+        public bool InvertG { get; set; }
+        public uint XTillingMethod { get; set; }
+        public uint YTillingMethod { get; set; }
+        public float Brightness { get; set; }
+        public float Saturation { get; set; }
+        public float Hue { get; set; }
+        public float MinAlpha { get; set; }
+        public float MaxAlpha { get; set; }
+        public string SourceFilePath { get; set; }
+        public bool IsVolumeTexture { get; set; }
+        public uint TileSizeX { get; set; }
+        public uint TileSizeY { get; set; }
+        public int SamplingFilterType { get; set; }
+    }
+'''
+LightMapTextureParameter = {
+    "MipBias": 0,
+    "CompressType": 0,
+    "MipGenType": 0,
+    "MaxSize": 0,
+    "SRgb": False,
+    "InvertG": False,
+    "XTillingMethod": 0,
+    "YTillingMethod": 0,
+    "Brightness": 0.0,
+    "Saturation": 0.0,
+    "Hue": 0.0,
+    "MinAlpha": 0.0,
+    "MaxAlpha": 0.0,
+    "SourceFilePath": "",
+    "IsVolumeTexture": False,
+    "TileSizeX": 0,
+    "TileSizeY": 0,
+    "SamplingFilterType": 0,
 }
 
 def load_light_map_data_from_json(json_path):
@@ -124,3 +170,30 @@ def load_light_map_data_from_json(json_path):
 
 
 DEFAULT_LIGHT_MAP_SCENE_NAME = "carcassonne"
+
+def convert_ue_position_to_chaos_position(position):
+    """
+    将虚幻引擎的位置坐标转换为Chaos的坐标
+    
+    Args:
+        position: 虚幻引擎的位置坐标 [x, y, z]
+        import_type: 转换类型，"Import" 或 "Export"
+        
+    Returns:
+        list: 转换后的Chaos坐标 [x, y, z]
+    """
+    if not isinstance(position, (list, tuple)) or len(position) != 2:
+        print(f"警告: 位置坐标格式不正确，应为[x, y]格式，当前: {position}")
+        return position
+    
+    # 交换x和y坐标：(x, y) -> (y, x)
+    local_location = [position[1], position[0]]
+    
+    # 根据导入/导出类型进行单位转换
+    if True:
+        # 从虚幻的厘米单位转换为Chaos的米单位（除以100）
+        local_location[0] /= 100.0
+        local_location[1] /= 100.0
+    
+    
+    return local_location

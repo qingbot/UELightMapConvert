@@ -883,7 +883,11 @@ def create_or_update_lightmap_xml(matches, output_path, lightmap_path, terrain_d
         if scene_config:
             level_left = scene_config.get("level_left_pos", [0, 0])
             level_right = scene_config.get("level_right_pos", [0, 0])
-            print(f"  - lightmap_area: ({level_left[0]}, {level_left[1]}) to ({level_right[0]}, {level_right[1]})")
+            # 转换坐标用于显示
+            chaos_left = GlobalParameter.convert_ue_position_to_chaos_position(level_left)
+            chaos_right = GlobalParameter.convert_ue_position_to_chaos_position(level_right)
+            print(f"  - lightmap_area (UE坐标): ({level_left[0]}, {level_left[1]}) to ({level_right[0]}, {level_right[1]})")
+            print(f"  - lightmap_area (Chaos坐标): ({chaos_left[0]:.2f}, {chaos_left[1]:.2f}) to ({chaos_right[0]:.2f}, {chaos_right[1]:.2f})")
         
     except Exception as e:
         print(f"创建或更新lightmap XML失败: {str(e)}")
@@ -956,8 +960,12 @@ def create_new_xml_structure(lightmap_path, scene_config=None, lightmap_texture_
         level_left_pos = scene_config.get("level_left_pos", [0, 0])
         level_right_pos = scene_config.get("level_right_pos", [0, 0])
         
+        # 将虚幻引擎坐标转换为Chaos坐标
+        chaos_left_pos = GlobalParameter.convert_ue_position_to_chaos_position(level_left_pos)
+        chaos_right_pos = GlobalParameter.convert_ue_position_to_chaos_position(level_right_pos)
+        
         lightmap_area = ET.SubElement(root, "lightmap_area")
-        lightmap_area.text = f"{format_float(level_left_pos[0])} {format_float(level_left_pos[1])} {format_float(level_right_pos[0])} {format_float(level_right_pos[1])}"
+        lightmap_area.text = f"{format_float(chaos_left_pos[0])} {format_float(chaos_left_pos[1])} {format_float(chaos_right_pos[0])} {format_float(chaos_right_pos[1])}"
     
     # 添加mip0_count元素
     mip0_count_element = ET.SubElement(root, "mip0_count")
