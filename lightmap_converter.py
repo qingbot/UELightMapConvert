@@ -631,14 +631,14 @@ def collect_all_unmatched_objects(xml_files, json_objects):
     
     return all_unmatched_xml, all_unmatched_json
 
-def create_lightmap_element(data_ref, lightmap_data, lightmap_path):
+def create_lightmap_element(data_ref, lightmap_data, lightmap_id):
     """
     创建一个lightmap元素
     
     Args:
         data_ref: 目标的data_ref
         lightmap_data: 光照图数据（必须包含有效数据）
-        lightmap_path: 光照图路径
+        lightmap_id: 光照图在lightmap_texture数组中的ID
         
     Returns:
         Element: 创建的lightmap元素
@@ -648,6 +648,7 @@ def create_lightmap_element(data_ref, lightmap_data, lightmap_path):
     debug_print(f"data_ref: {data_ref}", False)
     debug_print(f"lightmap_data类型: {type(lightmap_data)}", False)
     debug_print(f"lightmap_data内容: {lightmap_data}", False)
+    debug_print(f"lightmap_id: {lightmap_id}", False)
     
     # 验证lightmap_data必须包含有效数据
     if not lightmap_data or not isinstance(lightmap_data, dict):
@@ -734,78 +735,44 @@ def create_lightmap_element(data_ref, lightmap_data, lightmap_path):
             debug_print(f"BiasScale存在但数据无效，跳过", False)
             data.remove(bias_scale)
     
-    # 在data容器内添加LightMap元素
-    light_map = ET.SubElement(data, "LightMap")
-    
-    # 添加url元素
-    url = ET.SubElement(light_map, "url")
-    if "LQ" in lightmap_data:
-        lq_name = lightmap_data["LQ"]
-        url.text = f"{lightmap_path}/{lq_name}.texture.ast"
-    else:
-        url.text = f"{lightmap_path}/default.texture.ast"
-    
-    # 添加guid元素
-    guid = ET.SubElement(light_map, "guid")
-    
-    # 添加parameter元素
-    parameter = ET.SubElement(light_map, "parameter")
-    parameters = ET.SubElement(parameter, "parameters")
+    # 在data容器内添加LightMapID元素，使用传入的lightmap_id
+    light_map_id = ET.SubElement(data, "LightMapID")
+    light_map_id.text = str(lightmap_id)
     
     debug_print(f"=== 调试create_lightmap_element结束 ===\n", False)
     return element
 
-def create_or_update_lightmap_xml(matches, output_path, lightmap_path, overwrite_all=False, terrain_data=None, scene_config=None):
+def create_or_update_lightmap_xml(matches, output_path, lightmap_path, terrain_data=None, scene_config=None, scene_name=None):
     """
-    创建或更新lightmap XML文件
+    创建lightmap XML文件
     
     Args:
         matches: 匹配的物体列表
         output_path: 输出文件路径
         lightmap_path: 光照图路径
-        overwrite_all: 是否完全覆盖生成新文件
         terrain_data: 地形数据(可选)
         scene_config: 场景配置(可选)
+        scene_name: 场景名称(可选)
     """
     try:
-        # 检查是否需要完全覆盖
-        if overwrite_all and os.path.exists(output_path):
-            print(f"启用完全覆盖模式，将创建全新XML文件替换 {output_path}")
-            root, lightmap_data = create_new_xml_structure(lightmap_path)
-            tree = ET.ElementTree(root)
-        # 创建新的XML或加载现有XML
-        elif os.path.exists(output_path):
-            print(f"更新现有的XML文件: {output_path}")
-            try:
-                tree = ET.parse(output_path)
-                root = tree.getroot()
-                
-                # 查找lightmap_data元素
-                lightmap_data = root.find("lightmap_data")
-                if lightmap_data is None:
-                    lightmap_data = root.find("ns:lightmap_data", XML_NS)
-                
-                # 如果找不到，创建一个
-                if lightmap_data is None:
-                    print("在XML中找不到lightmap_data元素，正在创建...")
-                    lightmap_data = ET.SubElement(root, "lightmap_data")
-                else:
-                    # 清除现有元素
-                    print(f"找到现有的lightmap_data元素，包含 {len(lightmap_data)} 个子元素，正在清除...")
-                    # 保存元素数量以便输出日志
-                    original_element_count = len(lightmap_data)
-                    lightmap_data.clear()
-                    print(f"已清除原有的 {original_element_count} 个lightmap_data子元素，准备覆盖数据")
-            except Exception as e:
-                print(f"读取现有XML文件失败: {str(e)}，创建新文件")
-                # 创建新的XML文件
-                root, lightmap_data = create_new_xml_structure(lightmap_path)
-                tree = ET.ElementTree(root)
-        else:
-            print(f"创建新的XML文件: {output_path}")
-            # 创建新的XML结构
-            root, lightmap_data = create_new_xml_structure(lightmap_path)
-            tree = ET.ElementTree(root)
+        # 构建lightmap_texture数组和获取mip0数量
+        lightmap_texture_array = []
+        mip0_count = 0
+        mesh_to_lightmap_id = {}
+        
+        if scene_config:
+            debug_print("构建lightmap_texture数组...")
+            lightmap_texture_array, mip0_count = build_lightmap_texture_array(scene_config)
+            debug_print(f"构建完成，共 {len(lightmap_texture_array)} 个纹理，mip0数量: {mip0_count}")
+        
+        # 加载打包结果以获取物体与lightmap_id的映射
+        if scene_name:
+            mesh_to_lightmap_id = load_packing_results(scene_name)
+        
+        # 直接创建新的XML结构，不考虑向后兼容
+        print(f"创建新的XML文件: {output_path}")
+        root, lightmap_data = create_new_xml_structure(lightmap_path, scene_config, lightmap_texture_array, mip0_count)
+        tree = ET.ElementTree(root)
         
         # 添加所有匹配的物体到lightmap_data
         added_count = 0
@@ -819,7 +786,26 @@ def create_or_update_lightmap_xml(matches, output_path, lightmap_path, overwrite
                     debug_print(f"lightmap_data类型: {type(match['lightmap_data'])}")
                     debug_print(f"lightmap_data内容: {match['lightmap_data']}")
                 
-                element = create_lightmap_element(match["data_ref"], match["lightmap_data"], lightmap_path)
+                # 获取物体对应的lightmap_id
+                lightmap_id = 0  # 默认ID
+                if xml_name in mesh_to_lightmap_id:
+                    lightmap_id = mesh_to_lightmap_id[xml_name]
+                else:
+                    # 如果没有找到映射关系，尝试使用LQ字段
+                    if "LQ" in match["lightmap_data"]:
+                        lq_name = match["lightmap_data"]["LQ"]
+                        # 尝试从LQ名称中提取纹理索引
+                        if lq_name.startswith("packed_lightmap_"):
+                            try:
+                                texture_index = int(lq_name.replace("packed_lightmap_", ""))
+                                lightmap_id = texture_index  # 直接使用texture_index作为lightmap_id
+                                debug_print(f"从LQ名称提取lightmap_id: {lightmap_id}")
+                            except ValueError:
+                                debug_print(f"无法从LQ名称提取索引: {lq_name}")
+                    
+                    debug_print(f"物体 {xml_name} 使用默认lightmap_id: {lightmap_id}")
+                
+                element = create_lightmap_element(match["data_ref"], match["lightmap_data"], lightmap_id)
                 if element is not None:  # 只有成功创建元素时才添加
                     lightmap_data.append(element)
                     added_count += 1
@@ -834,24 +820,17 @@ def create_or_update_lightmap_xml(matches, output_path, lightmap_path, overwrite
         if terrain_data and scene_config:
             debug_print("开始处理地形数据...")
             try:
-                # 查找是否已存在terrain_lightmap_data元素
-                existing_terrain_data = root.find("terrain_lightmap_data")
-                if existing_terrain_data is None:
-                    existing_terrain_data = root.find("ns:terrain_lightmap_data", XML_NS)
-                
-                # 如果存在，先移除
-                if existing_terrain_data is not None:
-                    debug_print("找到现有的terrain_lightmap_data元素，正在移除...")
-                    root.remove(existing_terrain_data)
+                # 直接移除现有的terrain_lightmap_data元素
+                for existing in root.findall("terrain_lightmap_data"):
+                    root.remove(existing)
                 
                 # 创建新的terrain_lightmap_data元素
                 terrain_lightmap_element = create_terrain_lightmap_element(terrain_data, lightmap_path, scene_config)
                 
                 # 将terrain_lightmap_data添加到root中，放在lightmap_data之后
-                # 查找lightmap_data的位置
                 lightmap_data_index = -1
                 for i, child in enumerate(root):
-                    if child.tag == "lightmap_data" or child.tag.endswith("}lightmap_data"):
+                    if child.tag == "lightmap_data":
                         lightmap_data_index = i
                         break
                 
@@ -895,21 +874,31 @@ def create_or_update_lightmap_xml(matches, output_path, lightmap_path, overwrite
         # 保存XML
         tree.write(output_path, encoding='UTF-8', xml_declaration=True)
         
-        if overwrite_all and os.path.exists(output_path):
-            print(f"成功使用全新的XML文件替换 {output_path}，包含 {added_count} 个物体" + (f" 和地形数据" if terrain_data else ""))
-        elif os.path.exists(output_path):
-            print(f"成功写入 {added_count} 个物体到 {output_path}，完全覆盖了原有的lightmap_data内容" + (f" 并添加了地形数据" if terrain_data else ""))
-        else:
-            print(f"成功创建包含 {added_count} 个物体的新XML文件 {output_path}" + (f" 和地形数据" if terrain_data else ""))
+        print(f"成功创建XML文件 {output_path}")
+        print(f"  - 包含 {added_count} 个物体的lightmap数据")
+        print(f"  - 包含 {len(lightmap_texture_array)} 个纹理的lightmap_texture数组")
+        print(f"  - mip0数量: {mip0_count}")
+        if terrain_data:
+            print(f"  - 包含地形数据: {terrain_data['combine_name']}")
+        if scene_config:
+            level_left = scene_config.get("level_left_pos", [0, 0])
+            level_right = scene_config.get("level_right_pos", [0, 0])
+            print(f"  - lightmap_area: ({level_left[0]}, {level_left[1]}) to ({level_right[0]}, {level_right[1]})")
         
     except Exception as e:
         print(f"创建或更新lightmap XML失败: {str(e)}")
         import traceback
         traceback.print_exc()
 
-def create_new_xml_structure(lightmap_path):
+def create_new_xml_structure(lightmap_path, scene_config=None, lightmap_texture_array=None, mip0_count=0):
     """
     创建新的XML结构
+    
+    Args:
+        lightmap_path: 光照图路径
+        scene_config: 场景配置
+        lightmap_texture_array: 纹理数组
+        mip0_count: mip0数量
     
     Returns:
         tuple: (root元素, lightmap_data元素)
@@ -955,6 +944,24 @@ def create_new_xml_structure(lightmap_path):
     
     # 添加lightmap_data元素
     lightmap_data = ET.SubElement(root, "lightmap_data")
+    
+    # 添加lightmap_texture数组
+    if lightmap_texture_array:
+        lightmap_texture = ET.SubElement(root, "lightmap_texture")
+        for texture_element in lightmap_texture_array:
+            lightmap_texture.append(texture_element)
+    
+    # 添加lightmap_area元素
+    if scene_config:
+        level_left_pos = scene_config.get("level_left_pos", [0, 0])
+        level_right_pos = scene_config.get("level_right_pos", [0, 0])
+        
+        lightmap_area = ET.SubElement(root, "lightmap_area")
+        lightmap_area.text = f"{format_float(level_left_pos[0])} {format_float(level_left_pos[1])} {format_float(level_right_pos[0])} {format_float(level_right_pos[1])}"
+    
+    # 添加mip0_count元素
+    mip0_count_element = ET.SubElement(root, "mip0_count")
+    mip0_count_element.text = str(mip0_count)
     
     return root, lightmap_data
 
@@ -1155,6 +1162,168 @@ def create_terrain_lightmap_element(terrain_data, lightmap_path, scene_config):
     debug_print(f"=== terrain_lightmap_data元素创建完成 ===\n")
     return terrain_lightmap_data
 
+def build_lightmap_texture_array(scene_config):
+    """
+    构建lightmap_texture数组，按照打包工具的输出顺序（仅LQ纹理）
+    
+    Args:
+        scene_config: 场景配置信息
+        
+    Returns:
+        list: 包含所有lightmap纹理信息的数组
+    """
+    texture_array = []
+    lightmap_path = scene_config["lightmap_path_in_chaos_assets"]
+    max_mip_level = scene_config.get("max_mip_level", 0)
+    
+    # 构建输出目录路径 - 假设打包工具输出在BigMap文件夹
+    source_lightmap_path = scene_config["source_lightmap_texture_path"]
+    bigmap_dir = os.path.join(os.path.dirname(source_lightmap_path), "BigMap")
+    
+    lightmap_dir = os.path.join(bigmap_dir, "lightmap")
+    
+    debug_print(f"构建lightmap_texture数组，扫描目录：{lightmap_dir}")
+    
+    # 首先扫描mip0文件，确定mip0的数量
+    mip0_count = 0
+    if os.path.exists(lightmap_dir):
+        # 扫描mip0文件 (packed_lightmap_0.png, packed_lightmap_1.png, ...)
+        mip0_files = []
+        for filename in os.listdir(lightmap_dir):
+            if filename.startswith("packed_lightmap_") and filename.endswith(".png"):
+                # 检查是否是mip0文件（不包含"mip"字样）
+                if "_mip" not in filename.lower():
+                    # 提取索引号
+                    try:
+                        index_str = filename.replace("packed_lightmap_", "").replace(".png", "")
+                        index = int(index_str)
+                        mip0_files.append((index, filename))
+                    except ValueError:
+                        continue
+        
+        # 按索引排序
+        mip0_files.sort()
+        mip0_count = len(mip0_files)
+        
+        debug_print(f"找到 {mip0_count} 个mip0文件")
+        
+        # 添加mip0的LQ纹理
+        for index, filename in mip0_files:
+            # 只添加LQ纹理，将.png改为.texture.ast
+            filename_without_ext = os.path.splitext(filename)[0]
+            lq_element = create_lightmap_texture_element(
+                f"{lightmap_path}/lightmap/{filename_without_ext}.texture.ast",
+                generate_sketum_id()
+            )
+            texture_array.append(lq_element)
+    
+    # 然后按mip级别添加合并的mip纹理
+    for mip_level in range(1, max_mip_level + 1):
+        if os.path.exists(lightmap_dir):
+            # 扫描该mip级别的文件
+            mip_files = []
+            for filename in os.listdir(lightmap_dir):
+                if filename.startswith(f"packed_lightmap_mip{mip_level}_") and filename.endswith(".png"):
+                    # 提取索引号
+                    try:
+                        index_str = filename.replace(f"packed_lightmap_mip{mip_level}_", "").replace(".png", "")
+                        index = int(index_str)
+                        mip_files.append((index, filename))
+                    except ValueError:
+                        continue
+            
+            # 按索引排序
+            mip_files.sort()
+            
+            debug_print(f"找到 {len(mip_files)} 个mip{mip_level}文件")
+            
+            # 添加该mip级别的LQ纹理
+            for index, filename in mip_files:
+                # 只添加LQ纹理，将.png改为.texture.ast
+                filename_without_ext = os.path.splitext(filename)[0]
+                lq_element = create_lightmap_texture_element(
+                    f"{lightmap_path}/lightmap/{filename_without_ext}.texture.ast",
+                    generate_sketum_id()
+                )
+                texture_array.append(lq_element)
+    
+    debug_print(f"构建完成，共 {len(texture_array)} 个纹理元素，mip0数量: {mip0_count}")
+    
+    return texture_array, mip0_count
+
+def create_lightmap_texture_element(url, guid):
+    """
+    创建一个lightmap_texture元素
+    
+    Args:
+        url: 纹理的URL路径
+        guid: 纹理的GUID
+        
+    Returns:
+        Element: 创建的lightmap_texture元素
+    """
+    element = ET.Element("element", {"sketum_id": generate_sketum_id()})
+    
+    # 添加url元素
+    url_elem = ET.SubElement(element, "url")
+    url_elem.text = url
+    
+    # 添加guid元素
+    guid_elem = ET.SubElement(element, "guid")
+    guid_elem.text = guid
+    
+    # 添加parameter元素
+    parameter = ET.SubElement(element, "parameter")
+    parameters = ET.SubElement(parameter, "parameters")
+    
+    return element
+
+def load_packing_results(scene_name):
+    """
+    从打包结果中加载物体与纹理的映射关系
+    
+    Args:
+        scene_name: 场景名称
+        
+    Returns:
+        dict: 物体名称到lightmap_id的映射
+    """
+    # 获取打包结果文件路径
+    output_dir = os.path.join("./output/lightmaps", scene_name)
+    debug_file_path = os.path.join(output_dir, "packing_debug.json")
+    
+    mesh_to_lightmap_id = {}
+    
+    if os.path.exists(debug_file_path):
+        try:
+            with open(debug_file_path, 'r', encoding='utf-8') as f:
+                packing_results = json.load(f)
+            
+            debug_print(f"加载打包结果文件: {debug_file_path}")
+            
+            # 解析打包结果，构建物体到lightmap_id的映射
+            for texture_result in packing_results.get('texture_results', []):
+                texture_index = texture_result.get('texture_index', 0)
+                
+                # 现在每个纹理直接对应一个lightmap_id（只有LQ纹理）
+                lightmap_id = texture_index
+                
+                # 获取该纹理中的所有物体
+                for rect in texture_result.get('rectangles', []):
+                    mesh_id = rect.get('mesh_id')
+                    if mesh_id:
+                        mesh_to_lightmap_id[mesh_id] = lightmap_id
+                        debug_print(f"物体 {mesh_id} 映射到 lightmap_id {lightmap_id}")
+                        
+        except Exception as e:
+            debug_print(f"加载打包结果文件失败: {e}")
+    
+    else:
+        debug_print(f"打包结果文件不存在: {debug_file_path}")
+    
+    return mesh_to_lightmap_id
+
+
 def main():
     parser = argparse.ArgumentParser(description="匹配XML和JSON物体并生成lightmap XML")
     
@@ -1170,8 +1339,7 @@ def main():
     parser.add_argument("--verbose", "-v", action="store_true",
                       help="详细输出模式，打印更多调试信息")
     
-    parser.add_argument("--overwrite-all", "-o", action="store_true",
-                      help="完全覆盖模式，生成全新的XML文件而不是仅替换<lightmap_data>节点")
+
     
     args = parser.parse_args()
     
@@ -1340,8 +1508,8 @@ def main():
             debug_print(f"提取地形数据时出错: {str(e)}")
             terrain_data = None
         
-        # 创建或更新lightmap XML，包含地形数据
-        create_or_update_lightmap_xml(all_matches, output_path, lightmap_path, args.overwrite_all, terrain_data, scene_config)
+        # 创建lightmap XML，包含地形数据
+        create_or_update_lightmap_xml(all_matches, output_path, lightmap_path, terrain_data, scene_config, scene_name)
         
         # 生成最终的完整调试报告
         generate_final_debug_report(
