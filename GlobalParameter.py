@@ -57,7 +57,7 @@ ALL_LIGHT_MAP_DATA = {
         # 各级lod的最远距离
         "lod_distance" : [12500],
 
-        "lightmap_absolute_path" : "D:/ev/dev/wolfgang/_games/proven_ground/_content/New Folder1/lightMaps",
+        "lightmap_absolute_path" : "E:/EV/dev/wolfgang/_games/proven_ground/_content/testSimpleLM/lightMaps",
         "original_lightmap_absolute_path" : "C:/chaos_integrated_tools/data_analysis/scene/light/light_map/BigLightmap"
     },
 
@@ -91,18 +91,18 @@ chaos_texture_document.cs中的TextureSerializeModel
 '''
 LightMapTextureParameter = {
     "MipBias": 0,
-    "CompressType": 0,
+    "CompressType": 5,
     "MipGenType": 0,
     "MaxSize": 0,
     "SRgb": False,
     "InvertG": False,
     "XTillingMethod": 0,
     "YTillingMethod": 0,
-    "Brightness": 0.0,
-    "Saturation": 0.0,
+    "Brightness": 1.0,
+    "Saturation": 1.0,
     "Hue": 0.0,
     "MinAlpha": 0.0,
-    "MaxAlpha": 0.0,
+    "MaxAlpha": 1.0,
     "SourceFilePath": "",
     "IsVolumeTexture": False,
     "TileSizeX": 0,
@@ -177,7 +177,6 @@ def convert_ue_position_to_chaos_position(position):
     
     Args:
         position: 虚幻引擎的位置坐标 [x, y, z]
-        import_type: 转换类型，"Import" 或 "Export"
         
     Returns:
         list: 转换后的Chaos坐标 [x, y, z]

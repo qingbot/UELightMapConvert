@@ -1,0 +1,67 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "运行lightmap_converter - carcassonne场景",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/lightmap_converter.py",
+            "args": [
+                "--scene", "carcassonne",
+                "--copy-textures"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "运行lightmap_converter - basic_level场景",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/lightmap_converter.py",
+            "args": [
+                "--scene", "basic_level",
+                "--copy-textures"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "运行lightmap_converter - 强制匹配模式",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/lightmap_converter.py",
+            "args": [
+                "--scene", "carcassonne",
+                "--force-match",
+                "--verbose"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "运行texture_tools - 复制贴图",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/run_texture_tools.py",
+            "args": [
+                "copy",
+                "--scene", "carcassonne"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "运行hybrid_lightmap_packer - 完整流程",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/hybrid_lightmap_packer_nsh.py",
+            "args": [
+                "--scene", "carcassonne",
+                "--process-staticmesh",
+                "--process-terrain"
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+} 

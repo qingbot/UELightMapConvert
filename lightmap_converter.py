@@ -1347,7 +1347,8 @@ def main():
     parser.add_argument("--verbose", "-v", action="store_true",
                       help="详细输出模式，打印更多调试信息")
     
-
+    parser.add_argument("--copy-textures", "-c", action="store_true",
+                      help="处理完成后自动复制光照图贴图到Chaos引擎目录")
     
     args = parser.parse_args()
     
@@ -1519,6 +1520,28 @@ def main():
         # 创建lightmap XML，包含地形数据
         create_or_update_lightmap_xml(all_matches, output_path, lightmap_path, terrain_data, scene_config, scene_name)
         
+        # 复制光照图贴图到Chaos引擎目录（如果启用）
+        if args.copy_textures:
+            print("\n=== 复制光照图贴图到Chaos引擎 ===")
+            try:
+                # 导入复制函数
+                from run_texture_tools import copy_lightmap_textures_to_chaos
+                
+                # 执行复制
+                copy_success = copy_lightmap_textures_to_chaos(scene_name)
+                
+                if copy_success:
+                    print("✅ 光照图贴图复制完成")
+                else:
+                    print("❌ 光照图贴图复制失败")
+                    
+            except Exception as e:
+                print(f"❌ 复制光照图贴图时出错: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            print("\n提示: 使用 --copy-textures 参数可以自动复制光照图贴图到Chaos引擎目录")
+        
         # 生成最终的完整调试报告
         generate_final_debug_report(
             xml_files, 
@@ -1534,6 +1557,19 @@ def main():
         
         print("处理完成!")
         print(f"详细调试信息已保存到: {debug_filename}")
+        
+        # 显示完整的工作流程提示
+        print("\n" + "="*80)
+        print("完整的光照图处理工作流程:")
+        print("="*80)
+        print("1. 打包光照图:")
+        print(f"   python hybrid_lightmap_packer_nsh.py --scene {scene_name} --process-staticmesh --process-terrain")
+        print("2. 生成XML元数据:")
+        print(f"   python lightmap_converter.py --scene {scene_name}")
+        print("3. 复制贴图到Chaos引擎:")
+        print(f"   python run_texture_tools.py copy --scene {scene_name}")
+        print("   或者在步骤2中使用 --copy-textures 参数自动复制")
+        print("="*80)
         
     finally:
         # 确保调试文件被关闭
