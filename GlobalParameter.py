@@ -27,6 +27,8 @@ ALL_LIGHT_MAP_DATA = {
 
         # 各级lod的最远距离
         "lod_distance" : [100,200,400,800],
+        # mip0 一张贴图的边长对应的世界边长，mip1 是其二倍，以此类推
+        "mip0_texture_size" : 1024,
 
         # CHAOS中Lightmap所在的绝对路径
         "lightmap_absolute_path" : "D:/ev/dev/wolfgang/_games/proven_ground/_content/New Folder1/lightMaps",
@@ -56,6 +58,8 @@ ALL_LIGHT_MAP_DATA = {
 
         # 各级lod的最远距离
         "lod_distance" : [12500],
+        # mip0 一张贴图的边长对应的世界边长
+        "mip0_texture_size" : 102400,
 
         "lightmap_absolute_path" : "E:/EV/dev/wolfgang/_games/proven_ground/_content/testSimpleLM/lightMaps",
         "original_lightmap_absolute_path" : "C:/chaos_integrated_tools/data_analysis/scene/light/light_map/BigLightmap"

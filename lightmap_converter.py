@@ -3,6 +3,7 @@ import json
 import xml.etree.ElementTree as ET
 import uuid
 import argparse
+import math
 from datetime import datetime
 import GlobalParameter
 
@@ -763,7 +764,7 @@ def create_or_update_lightmap_xml(matches, output_path, lightmap_path, terrain_d
         if scene_config:
             debug_print("构建lightmap_texture数组...")
             lightmap_texture_array, mip0_count = build_lightmap_texture_array(scene_config)
-            debug_print(f"构建完成，共 {len(lightmap_texture_array)} 个纹理，mip0数量: {mip0_count}")
+            debug_print(f"构建完成，共 {len(lightmap_texture_array)} 个纹理")
         
         # 加载打包结果以获取物体与lightmap_id的映射
         if scene_name:
@@ -877,7 +878,6 @@ def create_or_update_lightmap_xml(matches, output_path, lightmap_path, terrain_d
         print(f"成功创建XML文件 {output_path}")
         print(f"  - 包含 {added_count} 个物体的lightmap数据")
         print(f"  - 包含 {len(lightmap_texture_array)} 个纹理的lightmap_texture数组")
-        print(f"  - mip0数量: {mip0_count}")
         if terrain_data:
             print(f"  - 包含地形数据: {terrain_data['combine_name']}")
         if scene_config:
@@ -888,6 +888,29 @@ def create_or_update_lightmap_xml(matches, output_path, lightmap_path, terrain_d
             chaos_right = GlobalParameter.convert_ue_position_to_chaos_position(level_right)
             print(f"  - lightmap_area (UE坐标): ({level_left[0]}, {level_left[1]}) to ({level_right[0]}, {level_right[1]})")
             print(f"  - lightmap_area (Chaos坐标): ({chaos_left[0]:.2f}, {chaos_left[1]:.2f}) to ({chaos_right[0]:.2f}, {chaos_right[1]:.2f})")
+            
+            # 输出新增的元素信息
+            lod_distance = scene_config.get("lod_distance", [])
+            mip0_texture_size = scene_config.get("mip0_texture_size")
+            max_mip_level = scene_config.get("max_mip_level", 0)
+            
+            if lod_distance:
+                # 显示虚幻和Chaos的值（转换为整数）
+                chaos_distances = [int(d / 100.0) for d in lod_distance]
+                print(f"  - lightmap_mip_distance (UE厘米): {lod_distance}")
+                print(f"  - lightmap_mip_distance (Chaos米，整数): {chaos_distances}")
+            if mip0_texture_size is not None:
+                # 显示虚幻和Chaos的值（转换为整数）
+                chaos_texture_size = int(mip0_texture_size / 100.0)
+                print(f"  - lightmap_mip0_grid_size (UE厘米): {mip0_texture_size}")
+                print(f"  - lightmap_mip0_grid_size (Chaos米，整数): {chaos_texture_size}")
+                if lod_distance and mip0_texture_size > 0:
+                    # 使用转换后的Chaos单位进行计算
+                    first_lod_distance_chaos = lod_distance[0] / 100.0
+                    mip0_texture_size_chaos = mip0_texture_size / 100.0
+                    side_grid_number = math.ceil(first_lod_distance_chaos / mip0_texture_size_chaos)
+                    print(f"  - lightmap_mip0_side_grid_number: {side_grid_number}")
+            print(f"  - mip_number: {max_mip_level + 1}")
         
     except Exception as e:
         print(f"创建或更新lightmap XML失败: {str(e)}")
@@ -902,7 +925,7 @@ def create_new_xml_structure(lightmap_path, scene_config=None, lightmap_texture_
         lightmap_path: 光照图路径
         scene_config: 场景配置
         lightmap_texture_array: 纹理数组
-        mip0_count: mip0数量
+        mip0_count: mip0数量 (已废弃，保留参数以兼容调用)
     
     Returns:
         tuple: (root元素, lightmap_data元素)
@@ -967,9 +990,38 @@ def create_new_xml_structure(lightmap_path, scene_config=None, lightmap_texture_
         lightmap_area = ET.SubElement(root, "lightmap_area")
         lightmap_area.text = f"{format_float(chaos_left_pos[0])} {format_float(chaos_left_pos[1])} {format_float(chaos_right_pos[0])} {format_float(chaos_right_pos[1])}"
     
-    # 添加mip0_count元素
-    mip0_count_element = ET.SubElement(root, "mip0_count")
-    mip0_count_element.text = str(mip0_count)
+    # 添加新的lightmap相关元素
+    if scene_config:
+        # 添加lightmap_mip_distance数组，值来自lod_distance（虚幻厘米转Chaos米，除以100）
+        lod_distance = scene_config.get("lod_distance", [])
+        if lod_distance:
+            lightmap_mip_distance = ET.SubElement(root, "lightmap_mip_distance")
+            for distance in lod_distance:
+                element = ET.SubElement(lightmap_mip_distance, "element", {"sketum_id": generate_sketum_id()})
+                # 虚幻引擎厘米转Chaos引擎米，除以100，转为正整数
+                element.text = str(int(distance / 100.0))
+        
+        # 添加lightmap_mip0_grid_size，值是mip0_texture_size（虚幻厘米转Chaos米，除以100）
+        mip0_texture_size = scene_config.get("mip0_texture_size")
+        if mip0_texture_size is not None:
+            lightmap_mip0_grid_size = ET.SubElement(root, "lightmap_mip0_grid_size")
+            # 虚幻引擎厘米转Chaos引擎米，除以100，转为正整数
+            lightmap_mip0_grid_size.text = str(int(mip0_texture_size / 100.0))
+        
+        # 添加lightmap_mip0_side_grid_number，值是lod_distance的第一位整除以lightmap_mip0_grid_size并向上取整
+        # 注意：计算使用转换后的Chaos单位（米）
+        if lod_distance and mip0_texture_size and mip0_texture_size > 0:
+            # 两个值都转换为Chaos单位进行计算
+            first_lod_distance_chaos = lod_distance[0] / 100.0  # 转为Chaos米单位
+            mip0_texture_size_chaos = mip0_texture_size / 100.0  # 转为Chaos米单位
+            side_grid_number = math.ceil(first_lod_distance_chaos / mip0_texture_size_chaos)
+            lightmap_mip0_side_grid_number = ET.SubElement(root, "lightmap_mip0_side_grid_number")
+            lightmap_mip0_side_grid_number.text = str(side_grid_number)  # math.ceil已经返回整数
+        
+        # 添加mip_number，值是max_mip_level + 1（因为mip等级从0开始计算）
+        max_mip_level = scene_config.get("max_mip_level", 0)
+        mip_number = ET.SubElement(root, "mip_number")
+        mip_number.text = str(max_mip_level + 1)  # 确保为正整数
     
     return root, lightmap_data
 
@@ -1255,7 +1307,7 @@ def build_lightmap_texture_array(scene_config):
                 )
                 texture_array.append(lq_element)
     
-    debug_print(f"构建完成，共 {len(texture_array)} 个纹理元素，mip0数量: {mip0_count}")
+    debug_print(f"构建完成，共 {len(texture_array)} 个纹理元素")
     
     return texture_array, mip0_count
 
