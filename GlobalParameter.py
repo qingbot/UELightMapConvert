@@ -18,7 +18,7 @@ ALL_LIGHT_MAP_DATA = {
         "lightmap_texture_size" : 2048,
         # 合并为一张大纹理时，该纹理的最小大小
         "lightmap_texture_min_size" : 16,
-        "max_mip_level" : 4,
+        # max_mip_level已移除，由算法根据格子数量自动计算完美四叉树的mip级别
 
         # 场景的左下角在世界坐标系中的位置 对应虚幻中的xy坐标, 以下俩构成了一个矩形对角线，这个矩形框定了场景的边界，尽量是正方形
         "level_left_pos" : [-1024,-1024],
@@ -28,7 +28,8 @@ ALL_LIGHT_MAP_DATA = {
         # 各级lod的最远距离
         "lod_distance" : [100,200,400,800],
         # mip0 一张贴图的边长对应的世界边长，mip1 是其二倍，以此类推
-        "mip0_texture_size" : 1024,
+        # mip0_texture_size已移除，改为用户直接指定mip0格子数量
+        "lightmap_mip0_grid_count": 8,  # mip0级别的n×n格子数中的n值 (必须是2的整数次幂: 2,4,8,16,32...)
 
         # CHAOS中Lightmap所在的绝对路径
         "lightmap_absolute_path" : "D:/ev/dev/wolfgang/_games/proven_ground/_content/New Folder1/lightMaps",
@@ -48,8 +49,7 @@ ALL_LIGHT_MAP_DATA = {
 
         # 合并为一张大纹理时，该纹理的最小边长
         "lightmap_texture_min_size" : 16,
-        # 合并为一张大纹理时，该纹理的最大mip级别,3表示有四个mip级别
-        "max_mip_level" : 3,
+        # max_mip_level已移除，由算法根据格子数量自动计算完美四叉树的mip级别
 
         # 场景的左下角在世界坐标系中的位置 对应虚幻中的xy坐标, 以下俩构成了一个矩形对角线，这个矩形框定了场景的边界，尽量是正方形
         "level_left_pos" : [-65000,-14010],
@@ -59,7 +59,8 @@ ALL_LIGHT_MAP_DATA = {
         # 各级lod的最远距离
         "lod_distance" : [12500],
         # mip0 一张贴图的边长对应的世界边长
-        "mip0_texture_size" : 102400,
+        # mip0_texture_size已移除，改为用户直接指定mip0格子数量  
+        "lightmap_mip0_grid_count": 8,  # mip0级别的n×n格子数中的n值 (必须是2的整数次幂: 2,4,8,16,32...)
 
         "lightmap_absolute_path" : "E:/EV/dev/wolfgang/_games/proven_ground/_content/testSimpleLM/lightMaps",
         "original_lightmap_absolute_path" : "C:/chaos_integrated_tools/data_analysis/scene/light/light_map/BigLightmap"

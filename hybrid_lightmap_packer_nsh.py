@@ -46,43 +46,72 @@ rectangle_id_map = {}
 # 全局计数器用于生成顺序ID
 rectangle_id_counter = 1
 
-def generate_world_single_area_size_and_adjusted_bounds(lod_distance, level_left_pos, level_right_pos):
-    """根据lod_distance生成世界单个区域的尺寸，并调整边界确保格子数为偶数且区域为正方形
+def validate_user_grid_count(grid_count):
+    """验证用户指定的mip0格子数量是否符合完美四叉树要求
     
     Args:
-        lod_distance: LOD距离数组
+        grid_count: 用户指定的n×n中的n值
+        
+    Returns:
+        bool: 是否有效
+    """
+    if not isinstance(grid_count, int) or grid_count <= 0:
+        print(f"❌ 错误: lightmap_mip0_grid_count必须是正整数，当前值: {grid_count}")
+        return False
+    
+    # 检查是否为2的整数次幂
+    if grid_count & (grid_count - 1) != 0:
+        print(f"❌ 错误: lightmap_mip0_grid_count必须是2的整数次幂")
+        print(f"   当前值: {grid_count}")
+        print(f"   有效值示例: 2, 4, 8, 16, 32, 64, 128, 256...")
+        
+        # 给出建议值
+        lower_power = 1
+        while lower_power < grid_count:
+            lower_power *= 2
+        upper_power = lower_power
+        lower_power //= 2
+        
+        if lower_power > 0:
+            print(f"   建议使用: {lower_power} (更节省) 或 {upper_power} (更安全)")
+        return False
+    
+    print(f"✅ mip0格子数量验证通过: {grid_count}×{grid_count} = {grid_count*grid_count} 个格子")
+    max_mip_level = int(np.log2(grid_count))
+    print(f"   将生成完美四叉树: {max_mip_level + 1} 个mip级别 (mip0到mip{max_mip_level})")
+    
+    return True
+
+def generate_world_single_area_size_and_adjusted_bounds_from_user_grid_count(user_grid_count, level_left_pos, level_right_pos):
+    """基于用户指定的mip0格子数量计算世界区域和格子大小
+    
+    Args:
+        user_grid_count: 用户指定的n×n中的n值 (必须是2的整数次幂)
         level_left_pos: 左下角位置 [x, y]
         level_right_pos: 右上角位置 [x, y]
     
     Returns:
-        tuple: (grid_size, adjusted_level_left_pos, adjusted_level_right_pos, grid_count_x, grid_count_y)
+        tuple: (grid_size, adjusted_level_left_pos, adjusted_level_right_pos, grid_count_x, grid_count_y, max_mip_level)
     """
     
-    # 计算每个LOD距离的加权值
-    weighted_values = []
-    for i, distance in enumerate(lod_distance):
-        weight = 1.0 / (2 ** i)  # 第0位乘以1，第1位乘以0.5，第2位乘以0.25，以此类推
-        weighted_values.append(distance * weight)
-    
-    base_grid_size = max(weighted_values)
+    # 验证用户输入
+    if not validate_user_grid_count(user_grid_count):
+        raise ValueError(f"无效的lightmap_mip0_grid_count: {user_grid_count}")
     
     # 计算原始区域大小
     world_width = level_right_pos[0] - level_left_pos[0]
     world_height = level_right_pos[1] - level_left_pos[1]
-    world_size = max(world_width, world_height)  # 取较大值作为基准
+    world_size = max(world_width, world_height)  # 取较大值作为基准，确保完全覆盖
     
-    # 计算原始格子数量
-    base_grid_count = int(np.ceil(world_size / base_grid_size))
+    # 基于用户指定的格子数量反推格子大小 
+    # 为确保格子边长为正整数，我们可能需要稍微放大区域
+    raw_grid_size = world_size / user_grid_count
     
-    # 确保格子数量为偶数
-    if base_grid_count % 2 != 0:
-        base_grid_count += 1
+    # 向上取整确保格子边长为正整数，这会稍微放大覆盖区域
+    integer_grid_size = int(np.ceil(raw_grid_size))
     
-    # 重新计算格子大小，确保能够整齐划分
-    adjusted_grid_size = world_size / base_grid_count
-    
-    # 计算调整后的区域大小（正方形）
-    adjusted_world_size = base_grid_count * adjusted_grid_size
+    # 计算调整后的区域大小（正方形，可能比原始区域稍大）
+    adjusted_world_size = user_grid_count * integer_grid_size
     
     # 保持左下角不变，调整右上角使区域变为正方形
     adjusted_level_left_pos = level_left_pos.copy()
@@ -91,12 +120,29 @@ def generate_world_single_area_size_and_adjusted_bounds(lod_distance, level_left
         level_left_pos[1] + adjusted_world_size
     ]
     
-    print(f"原始区域: [{level_left_pos[0]}, {level_left_pos[1]}] 到 [{level_right_pos[0]}, {level_right_pos[1]}]")
-    print(f"调整后区域: [{adjusted_level_left_pos[0]}, {adjusted_level_left_pos[1]}] 到 [{adjusted_level_right_pos[0]}, {adjusted_level_right_pos[1]}]")
-    print(f"基础格子大小: {base_grid_size:.2f} -> 调整后格子大小: {adjusted_grid_size:.2f}")
-    print(f"格子数量: {base_grid_count} x {base_grid_count} (总计: {base_grid_count * base_grid_count})")
+    # 计算最大mip级别：从n×n一直合并到1×1
+    max_mip_level = int(np.log2(user_grid_count))
     
-    return adjusted_grid_size, adjusted_level_left_pos, adjusted_level_right_pos, base_grid_count, base_grid_count
+    print(f"👤 用户指定mip0格子数量: {user_grid_count}×{user_grid_count} = {user_grid_count*user_grid_count} 个格子")
+    print(f"📐 原始区域: [{level_left_pos[0]}, {level_left_pos[1]}] 到 [{level_right_pos[0]}, {level_right_pos[1]}]")
+    print(f"   - 区域尺寸: {world_width:.1f} × {world_height:.1f}")
+    print(f"📏 格子大小计算:")
+    print(f"   - 理论格子大小: {raw_grid_size:.2f}")
+    print(f"   - 整数格子大小: {integer_grid_size} (向上取整确保为正整数)")
+    print(f"📦 调整后区域: [{adjusted_level_left_pos[0]}, {adjusted_level_left_pos[1]}] 到 [{adjusted_level_right_pos[0]}, {adjusted_level_right_pos[1]}]")
+    print(f"   - 调整后尺寸: {adjusted_world_size} × {adjusted_world_size}")
+    
+    if adjusted_world_size > world_size:
+        overage = adjusted_world_size - world_size
+        print(f"   ⚠️  为确保整数格子大小，区域放大了: {overage:.1f} 单位 ({overage/world_size*100:.1f}%)")
+    
+    print(f"🌳 完美四叉树结构 ({max_mip_level + 1} 个mip级别):")
+    for mip in range(max_mip_level + 1):
+        mip_count = user_grid_count // (2 ** mip)
+        total_textures = mip_count * mip_count
+        print(f"   - mip{mip}: {mip_count}×{mip_count} = {total_textures} 个贴图")
+    
+    return integer_grid_size, adjusted_level_left_pos, adjusted_level_right_pos, user_grid_count, user_grid_count, max_mip_level
 
 def generate_world_single_area_size(lod_distance):
     """保持向后兼容的函数，只返回格子大小"""
@@ -207,12 +253,14 @@ def create_grid_key(grid_x, grid_y):
     """
     return f"grid_{grid_x}_{grid_y}"
 
-def organize_grids_by_mip_levels(groups, max_mip_level):
-    """按位置组织grid为不同mip级别的合并组
+def organize_grids_by_mip_levels_perfect_quadtree(groups, max_mip_level, grid_count_x, grid_count_y):
+    """按位置组织grid为完美四叉树的mip级别合并组
     
     Args:
         groups: 原始的grid组织结构 {grid_key: items}
-        max_mip_level: 最大mip级别
+        max_mip_level: 最大mip级别 
+        grid_count_x: X方向格子数量 (必须是2的整数次幂)
+        grid_count_y: Y方向格子数量 (必须是2的整数次幂)
         
     Returns:
         字典，包含每个mip级别的组织信息
@@ -224,7 +272,90 @@ def organize_grids_by_mip_levels(groups, max_mip_level):
     """
     mip_organizations = {}
     
-    # 解析所有grid坐标
+    # 验证输入参数
+    if grid_count_x != grid_count_y:
+        print(f"错误: 格子数量不是正方形 {grid_count_x}x{grid_count_y}")
+        return mip_organizations
+        
+    if grid_count_x & (grid_count_x - 1) != 0:  # 检查是否为2的整数次幂
+        print(f"错误: 格子数量 {grid_count_x} 不是2的整数次幂")
+        return mip_organizations
+    
+    base_size = grid_count_x
+    print(f"完美四叉树组织: {base_size}×{base_size} 格子，{max_mip_level + 1} 个mip级别")
+    
+    # 为每个mip级别创建合并组
+    for mip_level in range(max_mip_level + 1):
+        mip_organizations[mip_level] = {}
+        
+        if mip_level == 0:
+            # mip0: 每个grid独立
+            index = 0
+            for y in range(base_size):
+                for x in range(base_size):
+                    grid_key = create_grid_key(x, y)
+                    if grid_key in groups:  # 只包含实际存在的grid
+                        mip_organizations[0][grid_key] = {
+                            'grids': [grid_key],
+                            'index': index
+                        }
+                        index += 1
+        else:
+            # mip1+: 按2^mip_level大小合并
+            merge_size = 2 ** mip_level  # mip1=2, mip2=4, mip3=8, ...
+            mip_grid_count = base_size // merge_size  # 当前mip级别的格子数
+            
+            merge_index = 0
+            
+            # 按完美四叉树组织：从(0,0)开始，按merge_size的块遍历
+            for mip_y in range(mip_grid_count):
+                for mip_x in range(mip_grid_count):
+                    # 计算原始grid坐标的基础位置
+                    base_x = mip_x * merge_size
+                    base_y = mip_y * merge_size
+                    
+                    # 收集当前块内的所有grid
+                    grids_in_block = []
+                    for dy in range(merge_size):
+                        for dx in range(merge_size):
+                            grid_x = base_x + dx
+                            grid_y = base_y + dy
+                            grid_key = create_grid_key(grid_x, grid_y)
+                            if grid_key in groups:
+                                grids_in_block.append(grid_key)
+                    
+                    # 创建合并项 (即使某些grid不存在，也要创建，用于保持完美四叉树结构)
+                    merge_key = f"mip{mip_level}_merge_{base_x}_{base_y}"
+                    mip_organizations[mip_level][merge_key] = {
+                        'grids': grids_in_block,
+                        'index': merge_index,
+                        'base_x': base_x,
+                        'base_y': base_y,
+                        'merge_size': merge_size,
+                        'mip_x': mip_x,
+                        'mip_y': mip_y
+                    }
+                    merge_index += 1
+    
+    # 打印完美四叉树组织结果
+    print(f"完美四叉树mip组织结果:")
+    for mip_level in range(max_mip_level + 1):
+        count = len(mip_organizations[mip_level])
+        expected_count = (base_size // (2 ** mip_level)) ** 2
+        if mip_level == 0:
+            print(f"  mip{mip_level}: {count} 个独立grid (期望: {expected_count})")
+        else:
+            merge_size = 2 ** mip_level
+            print(f"  mip{mip_level}: {count} 个 {merge_size}×{merge_size} 合并块 (期望: {expected_count})")
+        
+        if count != expected_count:
+            print(f"    ⚠️  警告: 实际数量({count}) 与期望数量({expected_count})不符")
+    
+    return mip_organizations
+
+def organize_grids_by_mip_levels(groups, max_mip_level):
+    """保持向后兼容的函数"""
+    # 推断格子数量
     grid_coords = {}
     for grid_key in groups.keys():
         coord = parse_grid_key(grid_key)
@@ -233,7 +364,7 @@ def organize_grids_by_mip_levels(groups, max_mip_level):
     
     if not grid_coords:
         print("警告: 没有找到有效的grid坐标")
-        return mip_organizations
+        return {}
     
     # 计算边界
     all_x = [coord[0] for coord in grid_coords.values()]
@@ -241,63 +372,10 @@ def organize_grids_by_mip_levels(groups, max_mip_level):
     min_x, max_x = min(all_x), max(all_x)
     min_y, max_y = min(all_y), max(all_y)
     
-    print(f"Grid边界: x=[{min_x}, {max_x}], y=[{min_y}, {max_y}]")
+    grid_count_x = max_x - min_x + 1
+    grid_count_y = max_y - min_y + 1
     
-    # mip0: 保持原样，每个grid独立
-    mip_organizations[0] = {}
-    index = 0
-    for y in range(min_y, max_y + 1):
-        for x in range(min_x, max_x + 1):
-            grid_key = create_grid_key(x, y)
-            if grid_key in groups:
-                mip_organizations[0][grid_key] = {
-                    'grids': [grid_key],
-                    'index': index
-                }
-                index += 1
-    
-    # 为每个mip级别创建合并组
-    for mip_level in range(1, max_mip_level + 1):
-        mip_organizations[mip_level] = {}
-        merge_size = 2 ** mip_level  # mip1=2x2, mip2=4x4
-        
-        merge_index = 0
-        
-        # 从左下角开始，按merge_size的块遍历
-        for base_y in range(min_y, max_y + 1, merge_size):
-            for base_x in range(min_x, max_x + 1, merge_size):
-                # 收集当前块内的所有grid
-                grids_in_block = []
-                for dy in range(merge_size):
-                    for dx in range(merge_size):
-                        grid_x = base_x + dx
-                        grid_y = base_y + dy
-                        grid_key = create_grid_key(grid_x, grid_y)
-                        if grid_key in groups:
-                            grids_in_block.append(grid_key)
-                
-                # 如果块内有任何grid，创建合并项
-                if grids_in_block:
-                    merge_key = f"mip{mip_level}_merge_{base_x}_{base_y}"
-                    mip_organizations[mip_level][merge_key] = {
-                        'grids': grids_in_block,
-                        'index': merge_index,
-                        'base_x': base_x,
-                        'base_y': base_y,
-                        'merge_size': merge_size
-                    }
-                    merge_index += 1
-    
-    # 打印组织结果
-    for mip_level in range(max_mip_level + 1):
-        count = len(mip_organizations[mip_level])
-        if mip_level == 0:
-            print(f"mip{mip_level}: {count} 个独立grid (输出: lightmap/packed_lightmap_X.png, dir/packed_lightmap_X_dir.png)")
-        else:
-            merge_size = 2 ** mip_level
-            print(f"mip{mip_level}: {count} 个 {merge_size}x{merge_size} 合并块 (输出: lightmap/packed_lightmap_mip{mip_level}_Y.png, dir/packed_lightmap_mip{mip_level}_Y_dir.png)")
-    
-    return mip_organizations
+    return organize_grids_by_mip_levels_perfect_quadtree(groups, max_mip_level, grid_count_x, grid_count_y)
 
 def merge_grid_textures_for_mip(merge_info, grid_texture_paths, texture_size, is_dir=False):
     """合并多个grid的纹理为一个mip级别的大纹理
@@ -1537,8 +1615,9 @@ def process_staticmesh_lightmap(args, scene_data, json_data, output_dir):
         min_texture_size = scene_data.get("lightmap_texture_min_size", 16)
         level_left_pos = scene_data.get("level_left_pos", [-1024, -1024])
         level_right_pos = scene_data.get("level_right_pos", [1024, 1024])
-        lod_distance = scene_data.get("lod_distance", [100, 200, 400, 800])
-        max_mip_level = scene_data.get("max_mip_level", 0)
+        # 新增：读取用户指定的mip0格子数量
+        user_grid_count = scene_data.get("lightmap_mip0_grid_count", 8)  # 默认8×8=64个格子
+        # max_mip_level将根据用户指定的格子数量自动计算，不再从配置中读取
         
         total_start_time = time.time()
         
@@ -1550,12 +1629,21 @@ def process_staticmesh_lightmap(args, scene_data, json_data, output_dir):
         # 步骤2: 计算调整后的区域和按空间位置分组数据
         step2_start_time = time.time()
         
-        # 使用新的函数计算调整后的区域和格子大小
-        grid_size, adjusted_level_left_pos, adjusted_level_right_pos, grid_count_x, grid_count_y = \
-            generate_world_single_area_size_and_adjusted_bounds(lod_distance, level_left_pos, level_right_pos)
+        # 使用基于用户指定格子数量的新算法计算调整后的区域和格子大小
+        try:
+            grid_size, adjusted_level_left_pos, adjusted_level_right_pos, grid_count_x, grid_count_y, auto_max_mip_level = \
+                generate_world_single_area_size_and_adjusted_bounds_from_user_grid_count(user_grid_count, level_left_pos, level_right_pos)
+        except ValueError as e:
+            print(f"\n❌ 配置错误: {e}")
+            print(f"请修改 GlobalParameter.py 中场景 '{args.scene}' 的 'lightmap_mip0_grid_count' 参数")
+            return False, json_data
         
-        print(f"根据lod_distance计算并调整后的格子大小: {grid_size}")
-        print(f"格子数量: {grid_count_x} x {grid_count_y}")
+        # 使用基于用户指定格子数量计算的最大mip级别
+        max_mip_level = auto_max_mip_level
+        print(f"🎯 基于用户指定格子数量的完美四叉树算法:")
+        print(f"   - 格子大小: {grid_size} 单位")
+        print(f"   - 格子数量: {grid_count_x}×{grid_count_y} = {grid_count_x*grid_count_y} 个")
+        print(f"   - mip级别: {max_mip_level + 1} 级 (mip0到mip{max_mip_level})")
         
         global groups  # 使其成为全局变量，以便在其他函数中访问
         groups = group_by_spatial_location_with_adjusted_bounds(
@@ -1719,8 +1807,8 @@ def process_staticmesh_lightmap(args, scene_data, json_data, output_dir):
         if max_mip_level > 0:
             print(f"\n开始创建按位置合并的mipmap...")
             
-            # 组织grid为不同的mip级别
-            mip_organizations = organize_grids_by_mip_levels(groups, max_mip_level)
+            # 组织grid为完美四叉树的mip级别  
+            mip_organizations = organize_grids_by_mip_levels_perfect_quadtree(groups, max_mip_level, grid_count_x, grid_count_y)
             
             # 创建并保存合并的mip纹理
             merged_paths = create_and_save_merged_mip_textures(
@@ -1940,26 +2028,25 @@ def go_main(parser):
     print(f"纹理大小: {texture_size}")
     print(f"最小纹理大小: {min_texture_size}")
     
-    # 获取max_mip_level并显示mip级别信息
-    max_mip_level = scene_data.get("max_mip_level", 0)
-    print(f"Mip级别: {max_mip_level + 1} 级 (mip0 到 mip{max_mip_level})")
-    if max_mip_level > 0:
-        print("  源文件命名规则:")
-        print("    mip0: 原始文件名.png (如: lightmap_123.png)")
-        for level in range(1, max_mip_level + 1):
-            print(f"    mip{level}: 原始文件名_Mip_{level}.png (如: lightmap_123_Mip_{level}.png)")
-        print("  输出文件命名:")
-        print("  文件夹结构:")
-        print("    lightmap/ - 存放所有LQ纹理")
-        print("    dir/ - 存放所有Dir纹理")
-        print("  文件命名:")
-        print(f"    mip0: lightmap/packed_lightmap_X.png, dir/packed_lightmap_X_dir.png (原始分辨率，每个格子独立)")
-        for level in range(1, max_mip_level + 1):
-            merge_size = 2 ** level
-            print(f"    mip{level}: lightmap/packed_lightmap_mip{level}_Y.png, dir/packed_lightmap_mip{level}_Y_dir.png (合并{merge_size}x{merge_size}格子)")
-        print("  注：中间的单独mip级别不再输出，只输出mip0和合并后的mip纹理")
-    else:
-        print("  仅生成单个分辨率的大图 (mip0)")
+    # 显示新的用户指定格子数量的工作模式
+    user_grid_count = scene_data.get("lightmap_mip0_grid_count", 8)
+    print(f"🎯 用户指定格子模式: {user_grid_count}×{user_grid_count} = {user_grid_count*user_grid_count} 个mip0格子")
+    print("  🔧 新算法特点:")
+    print("    - 用户在GlobalParameter中直接指定mip0的n×n格子数")
+    print("    - 算法根据区域大小反推每个格子的边长 (确保为正整数)")
+    print("    - n必须是2的整数次幂 (2,4,8,16,32...) 以支持完美四叉树")
+    print("    - mip级别自动计算直到最高级只剩1个格子")
+    print("  💡 优势:")
+    print("    - 避免资源浪费 (如9×9需求不会被强制调整到16×16)")
+    print("    - 用户精确控制格子数量")
+    print("    - 仍保持完美四叉树结构")
+    print("  📁 输出文件结构:")
+    print("    lightmap/ - 存放所有LQ纹理")
+    print("    dir/ - 存放所有Dir纹理")
+    print("  📝 文件命名规则:")
+    print("    mip0: lightmap/packed_lightmap_X.png, dir/packed_lightmap_X_dir.png (每个格子独立)")
+    print("    mip1+: lightmap/packed_lightmap_mip{level}_Y.png, dir/packed_lightmap_mip{level}_Y_dir.png (按四叉树合并)")
+    print("  ⚠️  注意: 已移除mip0_texture_size和max_mip_level配置，改为lightmap_mip0_grid_count")
 
     # 设置输出路径
     output_dir = os.path.join("./output/lightmaps", args.scene)
