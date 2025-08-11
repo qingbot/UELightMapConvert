@@ -5,7 +5,6 @@ import uuid
 import argparse
 import math
 from datetime import datetime
-import GlobalParameter
 
 # 全局调试文件句柄
 debug_file = None
@@ -763,7 +762,7 @@ def create_or_update_lightmap_xml(matches, output_path, lightmap_path, terrain_d
         
         if scene_config:
             debug_print("构建lightmap_texture数组...")
-            lightmap_texture_array, mip0_count = build_lightmap_texture_array(scene_config)
+            lightmap_texture_array, mip0_count = build_lightmap_texture_array(scene_config, scene_name)
             debug_print(f"构建完成，共 {len(lightmap_texture_array)} 个纹理")
         
         # 加载打包结果以获取物体与lightmap_id的映射
@@ -772,7 +771,7 @@ def create_or_update_lightmap_xml(matches, output_path, lightmap_path, terrain_d
         
         # 直接创建新的XML结构，不考虑向后兼容
         print(f"创建新的XML文件: {output_path}")
-        root, lightmap_data = create_new_xml_structure(lightmap_path, scene_config, lightmap_texture_array, mip0_count)
+        root, lightmap_data = create_new_xml_structure(lightmap_path, scene_config, lightmap_texture_array, mip0_count, scene_name)
         tree = ET.ElementTree(root)
         
         # 添加所有匹配的物体到lightmap_data
@@ -884,8 +883,8 @@ def create_or_update_lightmap_xml(matches, output_path, lightmap_path, terrain_d
             level_left = scene_config.get("level_left_pos", [0, 0])
             level_right = scene_config.get("level_right_pos", [0, 0])
             # 转换坐标用于显示
-            chaos_left = GlobalParameter.convert_ue_position_to_chaos_position(level_left)
-            chaos_right = GlobalParameter.convert_ue_position_to_chaos_position(level_right)
+            chaos_left = simple_convert_ue_to_chaos_position(level_left)
+            chaos_right = simple_convert_ue_to_chaos_position(level_right)
             print(f"  - lightmap_area (UE坐标): ({level_left[0]}, {level_left[1]}) to ({level_right[0]}, {level_right[1]})")
             print(f"  - lightmap_area (Chaos坐标): ({chaos_left[0]:.2f}, {chaos_left[1]:.2f}) to ({chaos_right[0]:.2f}, {chaos_right[1]:.2f})")
             
@@ -917,7 +916,7 @@ def create_or_update_lightmap_xml(matches, output_path, lightmap_path, terrain_d
         import traceback
         traceback.print_exc()
 
-def create_new_xml_structure(lightmap_path, scene_config=None, lightmap_texture_array=None, mip0_count=0):
+def create_new_xml_structure(lightmap_path, scene_config=None, lightmap_texture_array=None, mip0_count=0, scene_name=None):
     """
     创建新的XML结构
     
@@ -926,6 +925,7 @@ def create_new_xml_structure(lightmap_path, scene_config=None, lightmap_texture_
         scene_config: 场景配置
         lightmap_texture_array: 纹理数组
         mip0_count: mip0数量 (已废弃，保留参数以兼容调用)
+        scene_name: 场景名称（用于加载converter数据）
     
     Returns:
         tuple: (root元素, lightmap_data元素)
@@ -984,8 +984,8 @@ def create_new_xml_structure(lightmap_path, scene_config=None, lightmap_texture_
         level_right_pos = scene_config.get("level_right_pos", [0, 0])
         
         # 将虚幻引擎坐标转换为Chaos坐标
-        chaos_left_pos = GlobalParameter.convert_ue_position_to_chaos_position(level_left_pos)
-        chaos_right_pos = GlobalParameter.convert_ue_position_to_chaos_position(level_right_pos)
+        chaos_left_pos = simple_convert_ue_to_chaos_position(level_left_pos)
+        chaos_right_pos = simple_convert_ue_to_chaos_position(level_right_pos)
         
         lightmap_area = ET.SubElement(root, "lightmap_area")
         lightmap_area.text = f"{format_float(chaos_left_pos[0])} {format_float(chaos_left_pos[1])} {format_float(chaos_right_pos[0])} {format_float(chaos_right_pos[1])}"
@@ -1008,15 +1008,29 @@ def create_new_xml_structure(lightmap_path, scene_config=None, lightmap_texture_
             # 虚幻引擎厘米转Chaos引擎米，除以100，转为正整数
             lightmap_mip0_grid_size.text = str(int(mip0_texture_size / 100.0))
         
-        # 添加lightmap_mip0_side_grid_number，值是lod_distance的第一位整除以lightmap_mip0_grid_size并向上取整
-        # 注意：计算使用转换后的Chaos单位（米）
-        if lod_distance and mip0_texture_size and mip0_texture_size > 0:
+        # 优先从converter数据获取lightmap_mip0_side_grid_number
+        side_grid_number = None
+        if scene_name:
+            converter_data = load_lightmap_converter_data(scene_name)
+            if converter_data:
+                side_grid_number = converter_data.get('lightmap_mip0_side_grid_number')
+                debug_print(f"从converter数据获取side_grid_number: {side_grid_number}")
+        
+        # 如果没有converter数据，使用旧的计算方法
+        if side_grid_number is None and lod_distance and mip0_texture_size and mip0_texture_size > 0:
             # 两个值都转换为Chaos单位进行计算
             first_lod_distance_chaos = lod_distance[0] / 100.0  # 转为Chaos米单位
             mip0_texture_size_chaos = mip0_texture_size / 100.0  # 转为Chaos米单位
             side_grid_number = math.ceil(first_lod_distance_chaos / mip0_texture_size_chaos)
+            debug_print(f"使用旧方法计算side_grid_number: {side_grid_number}")
+        
+        # 验证side_grid_number必须为偶数
+        if side_grid_number is not None:
+            if side_grid_number % 2 != 0:
+                print(f"⚠️  警告: side_grid_number ({side_grid_number}) 不是偶数，四叉树管理可能有问题")
+            
             lightmap_mip0_side_grid_number = ET.SubElement(root, "lightmap_mip0_side_grid_number")
-            lightmap_mip0_side_grid_number.text = str(side_grid_number)  # math.ceil已经返回整数
+            lightmap_mip0_side_grid_number.text = str(side_grid_number)
         
         # 添加mip_number，值是max_mip_level + 1（因为mip等级从0开始计算）
         max_mip_level = scene_config.get("max_mip_level", 0)
@@ -1222,16 +1236,65 @@ def create_terrain_lightmap_element(terrain_data, lightmap_path, scene_config):
     debug_print(f"=== terrain_lightmap_data元素创建完成 ===\n")
     return terrain_lightmap_data
 
-def build_lightmap_texture_array(scene_config):
+def build_lightmap_texture_array_from_converter_data(converter_data):
+    """
+    从converter数据构建lightmap_texture数组
+    
+    Args:
+        converter_data: converter数据
+        
+    Returns:
+        tuple: (texture_array, mip0_count)
+    """
+    texture_array = []
+    lightmap_texture_array = converter_data.get("lightmap_texture_array", [])
+    mip0_count = converter_data.get("mip_info", {}).get("mip0_texture_count", 0)
+    
+    debug_print(f"从converter数据构建lightmap_texture数组，总数: {len(lightmap_texture_array)}")
+    
+    # 按类型和mip级别排序：先LQ，后Dir；先mip0，后高级mip
+    def sort_key(item):
+        mip_level = item.get("mip_level", 0)
+        type_priority = 0 if item.get("type") == "LQ" else 1
+        return (mip_level, type_priority, item.get("texture_index", 0), item.get("merge_index", 0))
+    
+    sorted_textures = sorted(lightmap_texture_array, key=sort_key)
+    
+    # 只添加LQ纹理到数组（XML中只需要LQ纹理）
+    for texture_info in sorted_textures:
+        if texture_info.get("type") == "LQ":
+            # 将.png路径转换为.texture.ast路径
+            url = texture_info.get("url", "")
+            if url.endswith(".png"):
+                url = url.replace(".png", ".texture.ast")
+            
+            lq_element = create_lightmap_texture_element(url, generate_sketum_id())
+            texture_array.append(lq_element)
+    
+    debug_print(f"构建完成，数组长度: {len(texture_array)}, mip0数量: {mip0_count}")
+    
+    return texture_array, mip0_count
+
+def build_lightmap_texture_array(scene_config, scene_name=None):
     """
     构建lightmap_texture数组，按照打包工具的输出顺序（仅LQ纹理）
     
     Args:
         scene_config: 场景配置信息
+        scene_name: 场景名称（可选，用于加载converter数据）
         
     Returns:
-        list: 包含所有lightmap纹理信息的数组
+        tuple: (texture_array, mip0_count)
     """
+    # 首先尝试从converter数据构建
+    if scene_name:
+        converter_data = load_lightmap_converter_data(scene_name)
+        if converter_data:
+            return build_lightmap_texture_array_from_converter_data(converter_data)
+    
+    # 如果没有converter数据，使用旧的方法
+    print("使用旧方法构建lightmap_texture数组...")
+    
     texture_array = []
     lightmap_path = scene_config["lightmap_path_in_chaos_assets"]
     max_mip_level = scene_config.get("max_mip_level", 0)
@@ -1338,9 +1401,55 @@ def create_lightmap_texture_element(url, guid):
     
     return element
 
+def load_lightmap_converter_data(scene_name):
+    """加载hybrid_lightmap_packer_nsh输出的converter数据
+    
+    Args:
+        scene_name: 场景名称
+        
+    Returns:
+        dict: converter数据，如果加载失败则返回None
+    """
+    # 构建converter数据JSON文件的路径
+    output_dir = os.path.join("./output/lightmaps", scene_name)
+    converter_data_path = os.path.join(output_dir, "lightmap_converter_data.json")
+    
+    if not os.path.exists(converter_data_path):
+        print(f"错误: 找不到converter数据文件: {converter_data_path}")
+        print("请先运行hybrid_lightmap_packer_nsh.py --process-staticmesh生成数据")
+        return None
+    
+    try:
+        # 读取converter数据
+        with open(converter_data_path, 'r', encoding='utf-8') as f:
+            converter_data = json.load(f)
+        
+        print(f"✓ 已加载lightmap_converter数据:")
+        print(f"  - 场景: {converter_data.get('scene_name', 'Unknown')}")
+        print(f"  - 区域边界: {converter_data.get('area_bounds', {}).get('left_pos', [0, 0])} 到 {converter_data.get('area_bounds', {}).get('right_pos', [0, 0])}")
+        print(f"  - 格子数量: {converter_data.get('lightmap_mip0_side_grid_number', 0)} x {converter_data.get('lightmap_mip0_side_grid_number', 0)}")
+        print(f"  - 纹理总数: {converter_data.get('mip_info', {}).get('total_texture_count', 0)}")
+        print(f"  - 物体映射数: {len(converter_data.get('mesh_to_lightmap_id', {}))}")
+        
+        # 验证数据完整性
+        validation = converter_data.get('validation', {})
+        if not validation.get('grid_count_is_even', False):
+            print("❌ 验证失败: 格子数量不是偶数")
+            return None
+        if not validation.get('area_is_square', False):
+            print("❌ 验证失败: 区域不是正方形")
+            return None
+            
+        print("✓ 数据验证通过")
+        return converter_data
+        
+    except Exception as e:
+        print(f"读取converter数据时出错: {e}")
+        return None
+
 def load_packing_results(scene_name):
     """
-    从打包结果中加载物体与纹理的映射关系
+    从打包结果中加载物体与纹理的映射关系（向后兼容函数）
     
     Args:
         scene_name: 场景名称
@@ -1348,7 +1457,13 @@ def load_packing_results(scene_name):
     Returns:
         dict: 物体名称到lightmap_id的映射
     """
-    # 获取打包结果文件路径
+    # 首先尝试从新的converter数据中获取
+    converter_data = load_lightmap_converter_data(scene_name)
+    if converter_data:
+        return converter_data.get('mesh_to_lightmap_id', {})
+    
+    # 如果没有converter数据，回退到旧的方法
+    print("回退到旧的打包结果文件...")
     output_dir = os.path.join("./output/lightmaps", scene_name)
     debug_file_path = os.path.join(output_dir, "packing_debug.json")
     
@@ -1383,12 +1498,75 @@ def load_packing_results(scene_name):
     
     return mesh_to_lightmap_id
 
+def extract_scene_config_from_converter_data(converter_data):
+    """从converter数据中提取必要的场景配置信息
+    
+    Args:
+        converter_data: converter数据字典
+        
+    Returns:
+        dict: 场景配置字典
+    """
+    # 获取必要的路径和参数
+    bigmap_dir = converter_data.get("bigmap_directory", "")
+    area_bounds = converter_data.get("area_bounds", {})
+    mip_info = converter_data.get("mip_info", {})
+    
+    # 构建场景配置，只包含lightmap_converter需要的数据
+    scene_config = {
+        # 路径相关 - 从converter数据推断
+        "source_scene_xml_folder_path": ".",  # 需要用户通过命令行参数或其他方式提供
+        "source_lightmap_json_path": ".",     # 需要用户通过命令行参数或其他方式提供  
+        "lightmap_data_ast_path_in_chaos": "output_lightmap.ast",  # 默认输出路径
+        "lightmap_path_in_chaos_assets": "_project/lightMaps",     # 默认资源路径
+        
+        # 区域和格子相关 - 从converter数据获取
+        "level_left_pos": area_bounds.get("left_pos", [0, 0]),
+        "level_right_pos": area_bounds.get("right_pos", [0, 0]),
+        "grid_size": area_bounds.get("grid_size", 1024),
+        "grid_count_x": area_bounds.get("grid_count_x", 2),
+        "grid_count_y": area_bounds.get("grid_count_y", 2),
+        
+        # Mip相关 - 从converter数据获取
+        "max_mip_level": mip_info.get("max_mip_level", 0),
+        "lightmap_texture_size": 2048,  # 默认值，实际不太需要
+        
+        # 地形相关 - 默认值
+        "terrain_size_offset": [512, 512, 512, 512],
+        "mip0_texture_size": area_bounds.get("grid_size", 1024),
+        "lod_distance": [area_bounds.get("grid_size", 1024)],  # 使用格子大小作为LOD距离
+    }
+    
+    print(f"✓ 从converter数据提取场景配置:")
+    print(f"  - 区域边界: {scene_config['level_left_pos']} 到 {scene_config['level_right_pos']}")
+    print(f"  - 格子数量: {scene_config['grid_count_x']} x {scene_config['grid_count_y']}")
+    print(f"  - Mip级别: {scene_config['max_mip_level']}")
+    
+    return scene_config
+
+def simple_convert_ue_to_chaos_position(position):
+    """简单的UE到Chaos坐标转换（不依赖GlobalParameter）
+    
+    Args:
+        position: UE位置坐标 [x, y]
+        
+    Returns:
+        list: Chaos坐标 [y, x] (交换XY并转换为米单位)
+    """
+    if not isinstance(position, (list, tuple)) or len(position) != 2:
+        print(f"警告: 位置坐标格式不正确，应为[x, y]格式，当前: {position}")
+        return position
+    
+    # 交换x和y坐标：(x, y) -> (y, x)，并从厘米转换为米
+    local_location = [position[1] / 100.0, position[0] / 100.0]
+    
+    return local_location
 
 def main():
     parser = argparse.ArgumentParser(description="匹配XML和JSON物体并生成lightmap XML")
     
-    parser.add_argument("--scene", "-s", type=str, default=GlobalParameter.DEFAULT_LIGHT_MAP_SCENE_NAME, 
-                      help=f"要处理的场景名称，默认为{GlobalParameter.DEFAULT_LIGHT_MAP_SCENE_NAME}")
+    parser.add_argument("--scene", "-s", type=str, default="carcassonne", 
+                      help=f"要处理的场景名称，默认为carcassonne")
     
     parser.add_argument("--force-match", "-f", action="store_true",
                       help="强制匹配模式，尝试匹配所有JSON物体")
@@ -1402,27 +1580,53 @@ def main():
     parser.add_argument("--copy-textures", "-c", action="store_true",
                       help="处理完成后自动复制光照图贴图到Chaos引擎目录")
     
+    parser.add_argument("--xml-folder", type=str,
+                      help="XML文件夹路径（可选，如果不指定则使用默认路径）")
+    
+    parser.add_argument("--json-path", type=str,
+                      help="JSON文件路径（可选，如果不指定则使用默认路径）")
+    
+    parser.add_argument("--output-path", type=str,
+                      help="输出AST文件路径（可选，如果不指定则使用默认路径）")
+    
     args = parser.parse_args()
     
-    # 检查场景是否存在
+    # 检查场景的converter数据是否存在
     scene_name = args.scene
-    if scene_name not in GlobalParameter.ALL_LIGHT_MAP_DATA:
-        print(f"错误: 场景 '{scene_name}' 不存在")
-        print(f"可用场景: {', '.join(GlobalParameter.ALL_LIGHT_MAP_DATA.keys())}")
+    converter_data = load_lightmap_converter_data(scene_name)
+    if not converter_data:
+        print(f"错误: 场景 '{scene_name}' 的converter数据不存在")
+        print("请先运行 hybrid_lightmap_packer_nsh.py --process-staticmesh 生成数据")
         return
     
     # 初始化调试文件
     debug_filename = init_debug_file(scene_name)
     
     try:
-        # 获取场景配置
-        scene_config = GlobalParameter.ALL_LIGHT_MAP_DATA[scene_name]
+        # 从converter数据中获取必要的场景配置
+        scene_config = extract_scene_config_from_converter_data(converter_data)
         
-        # 获取路径信息
-        xml_folder_path = scene_config["source_scene_xml_folder_path"]
-        json_path = scene_config["source_lightmap_json_path"]
-        output_path = scene_config["lightmap_data_ast_path_in_chaos"]
+        # 获取路径信息，优先使用命令行参数
+        xml_folder_path = args.xml_folder or scene_config["source_scene_xml_folder_path"]
+        json_path = args.json_path or scene_config["source_lightmap_json_path"]
+        output_path = args.output_path or scene_config["lightmap_data_ast_path_in_chaos"]
         lightmap_path = scene_config["lightmap_path_in_chaos_assets"]
+        
+        # 如果路径仍然是默认的"."，尝试从当前目录推断
+        if xml_folder_path == ".":
+            # 尝试使用合理的默认路径
+            xml_folder_path = "."  # 当前目录
+            print("⚠️  使用当前目录作为XML文件夹，请确保当前目录下有.ast文件")
+        
+        if json_path == ".":
+            # 使用场景名称推断JSON路径
+            json_path = f"test_scene_data_{scene_name}.json"
+            print(f"⚠️  使用推断的JSON路径: {json_path}")
+        
+        if output_path == "output_lightmap.ast":
+            # 使用场景名称生成输出路径
+            output_path = f"output_lightmap_{scene_name}.ast"
+            print(f"使用生成的输出路径: {output_path}")
 
         print(f"\n处理场景: {scene_name}")
         print(f"XML文件夹路径: {xml_folder_path}")

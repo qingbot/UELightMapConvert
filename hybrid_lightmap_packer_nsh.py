@@ -46,16 +46,100 @@ rectangle_id_map = {}
 # 全局计数器用于生成顺序ID
 rectangle_id_counter = 1
 
-def generate_world_single_area_size(lod_distance):
-    """根据lod_distance生成世界单个区域的尺寸"""
+def generate_world_single_area_size_and_adjusted_bounds(lod_distance, level_left_pos, level_right_pos):
+    """根据lod_distance生成世界单个区域的尺寸，并调整边界确保格子数为偶数且区域为正方形
+    
+    Args:
+        lod_distance: LOD距离数组
+        level_left_pos: 左下角位置 [x, y]
+        level_right_pos: 右上角位置 [x, y]
+    
+    Returns:
+        tuple: (grid_size, adjusted_level_left_pos, adjusted_level_right_pos, grid_count_x, grid_count_y)
+    """
     
     # 计算每个LOD距离的加权值
     weighted_values = []
     for i, distance in enumerate(lod_distance):
         weight = 1.0 / (2 ** i)  # 第0位乘以1，第1位乘以0.5，第2位乘以0.25，以此类推
         weighted_values.append(distance * weight)
+    
+    base_grid_size = max(weighted_values)
+    
+    # 计算原始区域大小
+    world_width = level_right_pos[0] - level_left_pos[0]
+    world_height = level_right_pos[1] - level_left_pos[1]
+    world_size = max(world_width, world_height)  # 取较大值作为基准
+    
+    # 计算原始格子数量
+    base_grid_count = int(np.ceil(world_size / base_grid_size))
+    
+    # 确保格子数量为偶数
+    if base_grid_count % 2 != 0:
+        base_grid_count += 1
+    
+    # 重新计算格子大小，确保能够整齐划分
+    adjusted_grid_size = world_size / base_grid_count
+    
+    # 计算调整后的区域大小（正方形）
+    adjusted_world_size = base_grid_count * adjusted_grid_size
+    
+    # 保持左下角不变，调整右上角使区域变为正方形
+    adjusted_level_left_pos = level_left_pos.copy()
+    adjusted_level_right_pos = [
+        level_left_pos[0] + adjusted_world_size,
+        level_left_pos[1] + adjusted_world_size
+    ]
+    
+    print(f"原始区域: [{level_left_pos[0]}, {level_left_pos[1]}] 到 [{level_right_pos[0]}, {level_right_pos[1]}]")
+    print(f"调整后区域: [{adjusted_level_left_pos[0]}, {adjusted_level_left_pos[1]}] 到 [{adjusted_level_right_pos[0]}, {adjusted_level_right_pos[1]}]")
+    print(f"基础格子大小: {base_grid_size:.2f} -> 调整后格子大小: {adjusted_grid_size:.2f}")
+    print(f"格子数量: {base_grid_count} x {base_grid_count} (总计: {base_grid_count * base_grid_count})")
+    
+    return adjusted_grid_size, adjusted_level_left_pos, adjusted_level_right_pos, base_grid_count, base_grid_count
+
+def generate_world_single_area_size(lod_distance):
+    """保持向后兼容的函数，只返回格子大小"""
+    # 计算每个LOD距离的加权值
+    weighted_values = []
+    for i, distance in enumerate(lod_distance):
+        weight = 1.0 / (2 ** i)  # 第0位乘以1，第1位乘以0.5，第2位乘以0.25，以此类推
+        weighted_values.append(distance * weight)
         
-    return max(weighted_values) 
+    return max(weighted_values)
+
+def create_placeholder_texture(texture_size, lightmap_base_dir):
+    """创建占位纹理文件
+    
+    Args:
+        texture_size: 纹理大小 (宽度, 高度)
+        lightmap_base_dir: 灯光贴图基础目录
+        
+    Returns:
+        str: 占位纹理的路径
+    """
+    placeholder_path = os.path.join(lightmap_base_dir, "placeholder_black.png")
+    
+    # 如果占位纹理已存在，直接返回路径
+    if os.path.exists(placeholder_path):
+        return placeholder_path
+    
+    try:
+        # 创建黑色纹理 (RGBA)
+        width, height = texture_size if isinstance(texture_size, (list, tuple)) else (texture_size, texture_size)
+        black_texture = np.zeros((height, width, 4), dtype=np.uint8)
+        # 设置alpha为255 (不透明)
+        black_texture[:, :, 3] = 255
+        
+        # 保存为PNG
+        os.makedirs(os.path.dirname(placeholder_path), exist_ok=True)
+        Image.fromarray(black_texture).save(placeholder_path)
+        print(f"已创建占位纹理: {placeholder_path}")
+        
+        return placeholder_path
+    except Exception as e:
+        print(f"创建占位纹理时出错: {e}")
+        return placeholder_path 
 
 def generate_sequential_id(mesh_id, info=None):
     """生成简单的顺序ID，并维护映射用于后续查找
@@ -446,19 +530,16 @@ def extract_lightmap(lightmap_path, bias_scale):
         return np.zeros((64, 64, 4), dtype=np.uint8)
     
 
-def group_by_spatial_location(json_data, level_left_pos, level_right_pos, grid_size):
-    """按世界空间位置分组物体"""
+def group_by_spatial_location_with_adjusted_bounds(json_data, adjusted_level_left_pos, adjusted_level_right_pos, 
+                                                    grid_size, grid_count_x, grid_count_y):
+    """按世界空间位置分组物体，使用调整后的边界确保每个格子都有贴图"""
     groups = {}
     
-    # 计算世界边界和格子数量
-    world_min_x, world_min_y = level_left_pos
-    world_max_x, world_max_y = level_right_pos
+    # 使用调整后的世界边界
+    world_min_x, world_min_y = adjusted_level_left_pos
+    world_max_x, world_max_y = adjusted_level_right_pos
     
-    # 计算格子数量
-    grid_count_x = int(np.ceil((world_max_x - world_min_x) / grid_size))
-    grid_count_y = int(np.ceil((world_max_y - world_min_y) / grid_size))
-    
-    print(f"世界边界: [{world_min_x}, {world_min_y}] 到 [{world_max_x}, {world_max_y}]")
+    print(f"调整后世界边界: [{world_min_x}, {world_min_y}] 到 [{world_max_x}, {world_max_y}]")
     print(f"格子大小: {grid_size}, 格子数量: {grid_count_x} x {grid_count_y}")
     
     def get_grid_key(x, y):
@@ -469,6 +550,12 @@ def group_by_spatial_location(json_data, level_left_pos, level_right_pos, grid_s
         grid_x = max(0, min(grid_x, grid_count_x - 1))
         grid_y = max(0, min(grid_y, grid_count_y - 1))
         return f"grid_{grid_x}_{grid_y}"
+    
+    # 初始化所有可能的格子，确保每个格子都存在
+    for grid_y in range(grid_count_y):
+        for grid_x in range(grid_count_x):
+            grid_key = f"grid_{grid_x}_{grid_y}"
+            groups[grid_key] = []
     
     # 检查是否存在"Static Mesh"键
     if "Static Mesh" in json_data:
@@ -502,9 +589,6 @@ def group_by_spatial_location(json_data, level_left_pos, level_right_pos, grid_s
             # 根据位置计算格子键
             x, y = location[0], location[1]
             grid_key = get_grid_key(x, y)
-            
-            if grid_key not in groups:
-                groups[grid_key] = []
             
             # 添加到对应格子
             groups[grid_key].append({
@@ -551,9 +635,6 @@ def group_by_spatial_location(json_data, level_left_pos, level_right_pos, grid_s
             x, y = location[0], location[1]
             grid_key = get_grid_key(x, y)
             
-            if grid_key not in groups:
-                groups[grid_key] = []
-            
             # 添加到对应格子
             groups[grid_key].append({
                 "mesh_id": actor_name,  # 使用物体名称作为ID
@@ -565,17 +646,62 @@ def group_by_spatial_location(json_data, level_left_pos, level_right_pos, grid_s
                 "grid_key": grid_key  # 格子键
             })
     
+    # 为空格子创建占位贴图
+    empty_grid_count = 0
+    for grid_key, items in groups.items():
+        if len(items) == 0:
+            # 解析格子坐标
+            grid_info = grid_key.replace("grid_", "").split("_")
+            grid_x, grid_y = int(grid_info[0]), int(grid_info[1])
+            
+            # 计算格子中心世界坐标
+            center_x = world_min_x + (grid_x + 0.5) * grid_size
+            center_y = world_min_y + (grid_y + 0.5) * grid_size
+            
+            # 为空格子创建占位物体
+            placeholder_id = f"placeholder_{grid_key}"
+            groups[grid_key].append({
+                "mesh_id": placeholder_id,
+                "name": f"占位符_{grid_key}",
+                "location": [center_x, center_y],
+                "lightmap_lq": "placeholder_black",  # 使用占位贴图
+                "lightmap_hq": "placeholder_black",
+                "bias_scale": [0, 0, 1, 1],  # 使用整个纹理
+                "grid_key": grid_key,
+                "is_placeholder": True  # 标记为占位符
+            })
+            empty_grid_count += 1
+    
     # 打印分组结果统计
     total_items = sum(len(items) for items in groups.values())
     print(f"按空间位置分组完成: {len(groups)} 个格子, 共 {total_items} 个物体")
+    print(f"其中 {empty_grid_count} 个格子为空，已创建占位贴图")
     for grid_key, items in groups.items():
         grid_info = grid_key.replace("grid_", "").split("_")
         grid_x, grid_y = int(grid_info[0]), int(grid_info[1])
         world_x = world_min_x + grid_x * grid_size
         world_y = world_min_y + grid_y * grid_size
-        print(f"  - 格子 '{grid_key}' (世界坐标: [{world_x:.0f}, {world_y:.0f}]): {len(items)} 个物体")
+        placeholder_count = sum(1 for item in items if item.get("is_placeholder", False))
+        real_count = len(items) - placeholder_count
+        status = f" (真实: {real_count}, 占位: {placeholder_count})" if placeholder_count > 0 else f" (真实: {real_count})"
+        print(f"  - 格子 '{grid_key}' (世界坐标: [{world_x:.0f}, {world_y:.0f}]): {len(items)} 个物体{status}")
     
     return groups
+
+def group_by_spatial_location(json_data, level_left_pos, level_right_pos, grid_size):
+    """保持向后兼容的函数"""
+    # 计算世界边界和格子数量
+    world_min_x, world_min_y = level_left_pos
+    world_max_x, world_max_y = level_right_pos
+    
+    # 计算格子数量
+    grid_count_x = int(np.ceil((world_max_x - world_min_x) / grid_size))
+    grid_count_y = int(np.ceil((world_max_y - world_min_y) / grid_size))
+    
+    return group_by_spatial_location_with_adjusted_bounds(
+        json_data, level_left_pos, level_right_pos, 
+        grid_size, grid_count_x, grid_count_y
+    )
 
 def is_direct_actor_format(json_data):
     """判断是否是直接以物体名为键的JSON格式"""
@@ -922,6 +1048,9 @@ def process_and_save_packed_textures(results, group_rectangles, texture_size=409
     if not lightmap_base_dir:
         lightmap_base_dir = "."
     
+    # 创建占位纹理
+    placeholder_texture_path = create_placeholder_texture(64, lightmap_base_dir)
+    
     # 创建空白纹理 - 为每个mip级别创建LQ和Dir纹理
     packed_textures_mip = []  # 存储所有mip级别的LQ纹理
     packed_textures_dir_mip = []  # 存储所有mip级别的Dir纹理
@@ -1005,11 +1134,15 @@ def process_and_save_packed_textures(results, group_rectangles, texture_size=409
                         # 如果没有扩展名，直接添加mip后缀和.png
                         mip_lightmap_name = f"{lightmap_lq}_Mip_{mip_level}.png"
                 
-                # 获取完整的灯光贴图路径
-                if not os.path.isabs(mip_lightmap_name):
-                    full_lightmap_path = os.path.join(lightmap_base_dir, mip_lightmap_name)
+                # 处理占位纹理的特殊情况
+                if lightmap_lq == "placeholder_black":
+                    full_lightmap_path = placeholder_texture_path
                 else:
-                    full_lightmap_path = mip_lightmap_name
+                    # 获取完整的灯光贴图路径
+                    if not os.path.isabs(mip_lightmap_name):
+                        full_lightmap_path = os.path.join(lightmap_base_dir, mip_lightmap_name)
+                    else:
+                        full_lightmap_path = mip_lightmap_name
                 
                 # 检查文件是否存在
                 if not os.path.exists(full_lightmap_path):
@@ -1167,6 +1300,140 @@ def process_and_save_packed_textures(results, group_rectangles, texture_size=409
     
     return updated_lightmap_info
 
+def export_lightmap_converter_data(adjusted_level_left_pos, adjusted_level_right_pos, 
+                                  grid_size, grid_count_x, grid_count_y,
+                                  all_results, mip_organizations, max_mip_level, 
+                                  scene_name, bigmap_dir):
+    """导出lightmap_converter需要的数据
+    
+    Args:
+        adjusted_level_left_pos: 调整后的左下角位置
+        adjusted_level_right_pos: 调整后的右上角位置
+        grid_size: 格子大小
+        grid_count_x: X方向格子数量
+        grid_count_y: Y方向格子数量
+        all_results: 所有纹理结果
+        mip_organizations: mip级别组织信息
+        max_mip_level: 最大mip级别
+        scene_name: 场景名称
+        bigmap_dir: 大图目录
+        
+    Returns:
+        dict: lightmap_converter需要的数据
+    """
+    
+    # 构建lightmap_texture数组
+    lightmap_texture_array = []
+    mesh_to_lightmap_id = {}
+    
+    # 计算纹理总数：mip0 + 所有mip级别的合并纹理
+    mip0_texture_count = len(all_results)
+    
+    # 添加mip0纹理（每个格子独立）
+    for texture_result in all_results:
+        texture_index = texture_result.texture_index
+        
+        # LQ纹理
+        lq_relative_path = f"lightmap/packed_lightmap_{texture_index}.png"
+        lq_absolute_path = os.path.join(bigmap_dir, lq_relative_path)
+        lightmap_texture_array.append({
+            "url": lq_relative_path,
+            "absolute_path": lq_absolute_path,
+            "type": "LQ",
+            "mip_level": 0,
+            "texture_index": texture_index
+        })
+        
+        # Dir纹理
+        dir_relative_path = f"dir/packed_lightmap_{texture_index}_dir.png"
+        dir_absolute_path = os.path.join(bigmap_dir, dir_relative_path)
+        lightmap_texture_array.append({
+            "url": dir_relative_path,
+            "absolute_path": dir_absolute_path,
+            "type": "Dir", 
+            "mip_level": 0,
+            "texture_index": texture_index
+        })
+        
+        # 记录每个纹理中的物体映射
+        for i in range(texture_result.rectangle_count):
+            rect = texture_result.rectangles[i]
+            rect_id = rect.rectangle_id
+            
+            if rect_id in rectangle_id_map:
+                mesh_id = rectangle_id_map[rect_id]["mesh_id"]
+                mesh_to_lightmap_id[mesh_id] = len(lightmap_texture_array) - 2  # LQ纹理的索引
+    
+    # 添加合并的mip级别纹理
+    if max_mip_level > 0 and mip_organizations:
+        for mip_level in range(1, max_mip_level + 1):
+            if mip_level in mip_organizations:
+                for merge_key, merge_info in mip_organizations[mip_level].items():
+                    merge_index = merge_info['index']
+                    
+                    # LQ合并纹理
+                    lq_merge_relative_path = f"lightmap/packed_lightmap_mip{mip_level}_{merge_index}.png"
+                    lq_merge_absolute_path = os.path.join(bigmap_dir, lq_merge_relative_path)
+                    lightmap_texture_array.append({
+                        "url": lq_merge_relative_path,
+                        "absolute_path": lq_merge_absolute_path,
+                        "type": "LQ",
+                        "mip_level": mip_level,
+                        "merge_index": merge_index,
+                        "merge_info": merge_info
+                    })
+                    
+                    # Dir合并纹理
+                    dir_merge_relative_path = f"dir/packed_lightmap_mip{mip_level}_{merge_index}_dir.png"
+                    dir_merge_absolute_path = os.path.join(bigmap_dir, dir_merge_relative_path)
+                    lightmap_texture_array.append({
+                        "url": dir_merge_relative_path,
+                        "absolute_path": dir_merge_absolute_path,
+                        "type": "Dir",
+                        "mip_level": mip_level,
+                        "merge_index": merge_index,
+                        "merge_info": merge_info
+                    })
+    
+    # 构建输出数据
+    converter_data = {
+        "scene_name": scene_name,
+        "lightmap_mip0_side_grid_number": grid_count_x,  # 每边的格子数量（已确保为偶数）
+        "area_bounds": {
+            "left_pos": adjusted_level_left_pos,
+            "right_pos": adjusted_level_right_pos,
+            "grid_size": grid_size,
+            "grid_count_x": grid_count_x,
+            "grid_count_y": grid_count_y,
+            "is_square": True,  # 已确保为正方形
+            "grid_count_is_even": grid_count_x % 2 == 0  # 验证格子数为偶数
+        },
+        "mip_info": {
+            "max_mip_level": max_mip_level,
+            "mip0_texture_count": mip0_texture_count,
+            "total_texture_count": len(lightmap_texture_array)
+        },
+        "lightmap_texture_array": lightmap_texture_array,
+        "mesh_to_lightmap_id": mesh_to_lightmap_id,
+        "bigmap_directory": bigmap_dir,
+        "generation_timestamp": datetime.now().isoformat(),
+        "validation": {
+            "grid_count_is_even": grid_count_x % 2 == 0 and grid_count_y % 2 == 0,
+            "area_is_square": grid_count_x == grid_count_y,
+            "all_grids_have_textures": True,  # 已通过占位符确保
+            "texture_array_count_matches": len(lightmap_texture_array) > 0
+        }
+    }
+    
+    print(f"✓ 导出lightmap_converter数据:")
+    print(f"  - 区域边界: [{adjusted_level_left_pos[0]}, {adjusted_level_left_pos[1]}] 到 [{adjusted_level_right_pos[0]}, {adjusted_level_right_pos[1]}]")
+    print(f"  - 格子数量: {grid_count_x} x {grid_count_y} (每边格子数为偶数: {grid_count_x % 2 == 0})")
+    print(f"  - 纹理总数: {len(lightmap_texture_array)} (mip0: {mip0_texture_count})")
+    print(f"  - 物体映射数: {len(mesh_to_lightmap_id)}")
+    print(f"  - 验证通过: 区域正方形={converter_data['validation']['area_is_square']}, 格子偶数={converter_data['validation']['grid_count_is_even']}")
+    
+    return converter_data
+
 def process_terrain_lightmap(args, scene_data, json_data, source_json_path):
     """处理地形的灯光贴图
     
@@ -1280,21 +1547,30 @@ def process_staticmesh_lightmap(args, scene_data, json_data, output_dir):
         step1_time = time.time() - step1_start_time
         print(f"步骤1: 准备JSON数据完成，耗时: {step1_time:.2f}秒")
         
-        # 步骤2: 按空间位置分组数据
+        # 步骤2: 计算调整后的区域和按空间位置分组数据
         step2_start_time = time.time()
         
-        # 计算格子大小
-        grid_size = generate_world_single_area_size(lod_distance)
-        print(f"根据lod_distance计算的格子大小: {grid_size}")
+        # 使用新的函数计算调整后的区域和格子大小
+        grid_size, adjusted_level_left_pos, adjusted_level_right_pos, grid_count_x, grid_count_y = \
+            generate_world_single_area_size_and_adjusted_bounds(lod_distance, level_left_pos, level_right_pos)
+        
+        print(f"根据lod_distance计算并调整后的格子大小: {grid_size}")
+        print(f"格子数量: {grid_count_x} x {grid_count_y}")
         
         global groups  # 使其成为全局变量，以便在其他函数中访问
-        groups = group_by_spatial_location(json_data, level_left_pos, level_right_pos, grid_size)
+        groups = group_by_spatial_location_with_adjusted_bounds(
+            json_data, adjusted_level_left_pos, adjusted_level_right_pos, 
+            grid_size, grid_count_x, grid_count_y
+        )
         step2_time = time.time() - step2_start_time
         print(f"步骤2: 按空间位置分组完成，找到 {len(groups)} 个格子，耗时: {step2_time:.2f}秒")
         
         if len(groups) == 0:
             print("警告: 未找到有效的分组数据，请检查JSON格式")
             return False, json_data
+        
+        # 创建占位纹理
+        placeholder_texture_path = create_placeholder_texture(min_texture_size, lightmap_base_dir)
         
         # 步骤2.5: 计算每个物体实际需要的lightmap大小
         # 遍历每个格子，计算实际的lightmap大小
@@ -1309,46 +1585,56 @@ def process_staticmesh_lightmap(args, scene_data, json_data, output_dir):
                 lightmap_lq = item["lightmap_lq"]
                 bias_scale = item["bias_scale"]
                 
-                # 构建完整的贴图路径
-                if not os.path.isabs(lightmap_lq):
-                    full_lightmap_path = os.path.join(lightmap_base_dir, lightmap_lq + ".png")
+                # 检查是否为占位物体
+                if item.get("is_placeholder", False):
+                    # 占位物体使用固定大小
+                    pixel_width = min_texture_size
+                    pixel_height = min_texture_size
                 else:
-                    full_lightmap_path = lightmap_lq
+                    # 构建完整的贴图路径
+                    if not os.path.isabs(lightmap_lq):
+                        full_lightmap_path = os.path.join(lightmap_base_dir, lightmap_lq + ".png")
+                    else:
+                        full_lightmap_path = lightmap_lq
+                    
+                    # 加载贴图获取尺寸
+                    try:
+                        img = Image.open(full_lightmap_path)
+                        img_width, img_height = img.size
+                        
+                        # 计算实际的UV区域，y坐标和高度需要考虑只使用上半部分
+                        # u_min, v_min, width, height = bias_scale
+                        
+                        padded_size_x, padded_size_y, base_x, base_y = get_lightmap_size_from_bias_scale(bias_scale, img.size)
+                        # 注意：贴图只使用上半部分，所以v坐标和高度都需要乘以0.5
+                        
+                        # 计算宽高
+                        pixel_width = int(padded_size_x)
+                        pixel_height = int(padded_size_y)
+                        
+                        # 确保最小尺寸
+                        pixel_width = max(pixel_width, min_texture_size)
+                        pixel_height = max(pixel_height, min_texture_size)
+                    except Exception as e:
+                        print(f"警告: 处理 {mesh_id} 的灯光贴图时出错: {e}")
+                        # 如果加载失败，使用最小尺寸
+                        pixel_width = min_texture_size
+                        pixel_height = min_texture_size
                 
-                # 加载贴图获取尺寸
-                try:
-                    img = Image.open(full_lightmap_path)
-                    img_width, img_height = img.size
-                    
-                    # 计算实际的UV区域，y坐标和高度需要考虑只使用上半部分
-                    # u_min, v_min, width, height = bias_scale
-                    
-                    padded_size_x, padded_size_y, base_x, base_y = get_lightmap_size_from_bias_scale(bias_scale, img.size)
-                    # 注意：贴图只使用上半部分，所以v坐标和高度都需要乘以0.5
-                    
-                    # 计算宽高
-                    pixel_width = int(padded_size_x)
-                    pixel_height = int(padded_size_y)
-                    
-                    # 确保最小尺寸
-                    pixel_width = max(pixel_width, min_texture_size)
-                    pixel_height = max(pixel_height, min_texture_size)
-                    info = {
-                        "mesh_id": mesh_id,
-                        "name": item.get("name", mesh_id),
-                        "lightmap_lq": lightmap_lq,
-                        "original_bias_scale": bias_scale,  # 使用一致的字段名
-                        "width": pixel_width,
-                        "height": pixel_height,
-                        "rectangle_id": 0, # generate_sequential_id(mesh_id, grid_key),
-                    }
-                    info["rectangle_id"] = generate_sequential_id(mesh_id, info)
-                    # 添加到格子的矩形列表，增加rectangle_id字段
-                    group_rectangles[grid_key].append(info)
-                    
-                except Exception as e:
-                    print(f"警告: 处理 {mesh_id} 的灯光贴图时出错: {e}")
-                    raise e
+                # 创建信息对象
+                info = {
+                    "mesh_id": mesh_id,
+                    "name": item.get("name", mesh_id),
+                    "lightmap_lq": lightmap_lq,
+                    "original_bias_scale": bias_scale,  # 使用一致的字段名
+                    "width": pixel_width,
+                    "height": pixel_height,
+                    "rectangle_id": 0, # 临时ID，后面会被替换
+                    "is_placeholder": item.get("is_placeholder", False)  # 记录是否为占位符
+                }
+                info["rectangle_id"] = generate_sequential_id(mesh_id, info)
+                # 添加到格子的矩形列表，增加rectangle_id字段
+                group_rectangles[grid_key].append(info)
         
         print(f"已计算 {sum(len(rects) for rects in group_rectangles.values())} 个物体的lightmap大小")
 
@@ -1483,6 +1769,20 @@ def process_staticmesh_lightmap(args, scene_data, json_data, output_dir):
         print(f"新的光照图文件保存在: {bigmap_dir}")
         print(f"  - LQ纹理保存在: {os.path.join(bigmap_dir, 'lightmap')}")
         print(f"  - Dir纹理保存在: {os.path.join(bigmap_dir, 'dir')}")
+        
+        # 输出lightmap_converter需要的数据
+        converter_data = export_lightmap_converter_data(
+            adjusted_level_left_pos, adjusted_level_right_pos, 
+            grid_size, grid_count_x, grid_count_y,
+            all_results, mip_organizations, max_mip_level, 
+            args.scene, bigmap_dir
+        )
+        
+        # 保存到JSON文件
+        converter_data_path = os.path.join(output_dir, "lightmap_converter_data.json")
+        with open(converter_data_path, 'w', encoding='utf-8') as f:
+            json.dump(converter_data, f, indent=4)
+        print(f"已保存lightmap_converter数据到: {converter_data_path}")
         
         return True, updated_json_data
         

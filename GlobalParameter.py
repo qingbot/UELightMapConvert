@@ -20,7 +20,7 @@ ALL_LIGHT_MAP_DATA = {
         "lightmap_texture_min_size" : 16,
         "max_mip_level" : 4,
 
-        # 场景的左下角在世界坐标系中的位置 对应chaos中的xy坐标, 以下俩构成了一个矩形对角线，这个矩形框定了场景的边界，尽量是正方形
+        # 场景的左下角在世界坐标系中的位置 对应虚幻中的xy坐标, 以下俩构成了一个矩形对角线，这个矩形框定了场景的边界，尽量是正方形
         "level_left_pos" : [-1024,-1024],
         # 场景的右上角在世界坐标系中的位置
         "level_right_pos" : [1024,1024], 
@@ -46,7 +46,7 @@ ALL_LIGHT_MAP_DATA = {
         "terrain_size_offset" : [2048,2048,1024,1024],
         "lightmap_texture_size" : 2048,
 
-        # 合并为一张大纹理时，该纹理的最小大小
+        # 合并为一张大纹理时，该纹理的最小边长
         "lightmap_texture_min_size" : 16,
         # 合并为一张大纹理时，该纹理的最大mip级别,3表示有四个mip级别
         "max_mip_level" : 3,
