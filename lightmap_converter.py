@@ -1578,6 +1578,9 @@ def main():
     parser.add_argument("--verbose", "-v", action="store_true",
                       help="详细输出模式，打印更多调试信息")
     
+    parser.add_argument("--copy-textures", "-c", action="store_true",
+                      help="处理完成后自动复制光照图贴图到Chaos引擎目录")
+    
 
     
     args = parser.parse_args()
@@ -1764,24 +1767,27 @@ def main():
         # 创建lightmap XML，包含地形数据
         create_or_update_lightmap_xml(all_matches, output_path, lightmap_path, terrain_data, scene_config, scene_name)
         
-        # 自动复制光照图贴图到Chaos引擎目录
-        print("\n=== 复制光照图贴图到Chaos引擎 ===")
-        try:
-            # 导入复制函数
-            from run_texture_tools import copy_lightmap_textures_to_chaos
-            
-            # 执行复制
-            copy_success = copy_lightmap_textures_to_chaos(scene_name)
-            
-            if copy_success:
-                print("✅ 光照图贴图复制完成")
-            else:
-                print("❌ 光照图贴图复制失败")
+        # 复制光照图贴图到Chaos引擎目录（如果启用）
+        if args.copy_textures:
+            print("\n=== 复制光照图贴图到Chaos引擎 ===")
+            try:
+                # 导入复制函数
+                from run_texture_tools import copy_lightmap_textures_to_chaos
                 
-        except Exception as e:
-            print(f"❌ 复制光照图贴图时出错: {e}")
-            import traceback
-            traceback.print_exc()
+                # 执行复制
+                copy_success = copy_lightmap_textures_to_chaos(scene_name)
+                
+                if copy_success:
+                    print("✅ 光照图贴图复制完成")
+                else:
+                    print("❌ 光照图贴图复制失败")
+                    
+            except Exception as e:
+                print(f"❌ 复制光照图贴图时出错: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            print("\n💡 提示: 使用 --copy-textures 参数可以自动复制光照图贴图到Chaos引擎目录")
         
         # 生成最终的完整调试报告
         generate_final_debug_report(

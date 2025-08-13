@@ -192,9 +192,9 @@ def _load_external_scene_config():
             # 将外部配置合并到ALL_LIGHT_MAP_DATA中
             for scene_name, scene_config in external_config.items():
                 ALL_LIGHT_MAP_DATA[scene_name] = scene_config
-                print(f"✓ 已从外部配置加载场景 '{scene_name}'")
+                #print(f"✓ 已从外部配置加载场景 '{scene_name}'")
                 
-            print(f"✓ 外部配置文件加载完成，共加载 {len(external_config)} 个场景配置")
+            #print(f"✓ 外部配置文件加载完成，共加载 {len(external_config)} 个场景配置")
             
         except Exception as e:
             print(f"⚠️ 加载外部配置文件时出错: {e}")
