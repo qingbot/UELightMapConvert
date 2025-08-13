@@ -763,7 +763,7 @@ def create_or_update_lightmap_xml(matches, output_path, lightmap_path, terrain_d
         
         if scene_config:
             debug_print("构建lightmap_texture数组...")
-            lightmap_texture_array, mip0_count = build_lightmap_texture_array(scene_config, scene_name)
+            lightmap_texture_array, mip0_count = build_lightmap_texture_array(scene_config, scene_name, lightmap_path)
             debug_print(f"构建完成，共 {len(lightmap_texture_array)} 个纹理")
         
         # 加载打包结果以获取物体与lightmap_id的映射
@@ -1237,12 +1237,13 @@ def create_terrain_lightmap_element(terrain_data, lightmap_path, scene_config):
     debug_print(f"=== terrain_lightmap_data元素创建完成 ===\n")
     return terrain_lightmap_data
 
-def build_lightmap_texture_array_from_converter_data(converter_data):
+def build_lightmap_texture_array_from_converter_data(converter_data, lightmap_path):
     """
     从converter数据构建lightmap_texture数组
     
     Args:
         converter_data: converter数据
+        lightmap_path: chaos中的lightmap资源路径前缀
         
     Returns:
         tuple: (texture_array, mip0_count)
@@ -1269,6 +1270,18 @@ def build_lightmap_texture_array_from_converter_data(converter_data):
             if url.endswith(".png"):
                 url = url.replace(".png", ".texture.ast")
             
+            # 确保URL包含正确的lightmap_path前缀
+            if not url.startswith(lightmap_path):
+                # 如果URL是相对路径，添加前缀
+                if not url.startswith("/") and not url.startswith("_project"):
+                    url = f"{lightmap_path}/{url}"
+                # 如果URL已经是完整的相对路径（以_project开头），直接使用
+                elif url.startswith("_project"):
+                    pass  # 保持原样
+                else:
+                    # 其他情况，确保添加前缀
+                    url = f"{lightmap_path}/{url.lstrip('/')}"
+            
             lq_element = create_lightmap_texture_element(url, generate_sketum_id())
             texture_array.append(lq_element)
     
@@ -1276,13 +1289,14 @@ def build_lightmap_texture_array_from_converter_data(converter_data):
     
     return texture_array, mip0_count
 
-def build_lightmap_texture_array(scene_config, scene_name=None):
+def build_lightmap_texture_array(scene_config, scene_name=None, lightmap_path=None):
     """
     构建lightmap_texture数组，按照打包工具的输出顺序（仅LQ纹理）
     
     Args:
         scene_config: 场景配置信息
         scene_name: 场景名称（可选，用于加载converter数据）
+        lightmap_path: 光照图路径前缀（可选，如果提供则优先使用，否则从scene_config获取）
         
     Returns:
         tuple: (texture_array, mip0_count)
@@ -1291,13 +1305,18 @@ def build_lightmap_texture_array(scene_config, scene_name=None):
     if scene_name:
         converter_data = load_lightmap_converter_data(scene_name)
         if converter_data:
-            return build_lightmap_texture_array_from_converter_data(converter_data)
+            # 优先使用传入的lightmap_path参数，如果没有则从scene_config获取
+            if lightmap_path is None:
+                lightmap_path = scene_config["lightmap_path_in_chaos_assets"]
+            return build_lightmap_texture_array_from_converter_data(converter_data, lightmap_path)
     
     # 如果没有converter数据，使用旧的方法
     print("使用旧方法构建lightmap_texture数组...")
     
     texture_array = []
-    lightmap_path = scene_config["lightmap_path_in_chaos_assets"]
+    # 优先使用传入的lightmap_path参数，如果没有则从scene_config获取
+    if lightmap_path is None:
+        lightmap_path = scene_config["lightmap_path_in_chaos_assets"]
     max_mip_level = scene_config.get("max_mip_level", 0)
     
     # 构建输出目录路径 - 假设打包工具输出在BigMap文件夹

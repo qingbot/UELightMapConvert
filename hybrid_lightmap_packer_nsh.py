@@ -1407,7 +1407,10 @@ def export_lightmap_converter_data(adjusted_level_left_pos, adjusted_level_right
     # 计算纹理总数：mip0 + 所有mip级别的合并纹理
     mip0_texture_count = len(all_results)
     
-    # 添加mip0纹理（每个格子独立）
+    print(f"🔧 构建texture数组，期望mip0纹理数量: {mip0_texture_count}")
+    
+    # 第一步：先添加所有mip0的LQ纹理（索引0到mip0_texture_count-1）
+    mip0_lq_start_index = len(lightmap_texture_array)
     for texture_result in all_results:
         texture_index = texture_result.texture_index
         
@@ -1419,8 +1422,16 @@ def export_lightmap_converter_data(adjusted_level_left_pos, adjusted_level_right
             "absolute_path": lq_absolute_path,
             "type": "LQ",
             "mip_level": 0,
-            "texture_index": texture_index
+            "texture_index": texture_index,
+            "lightmap_id": len(lightmap_texture_array)  # 记录在数组中的实际索引
         })
+    
+    print(f"✓ 已添加{len(lightmap_texture_array)}个mip0 LQ纹理，索引范围: 0-{len(lightmap_texture_array)-1}")
+    
+    # 第二步：再添加所有mip0的Dir纹理（索引mip0_texture_count到2*mip0_texture_count-1）
+    mip0_dir_start_index = len(lightmap_texture_array)
+    for texture_result in all_results:
+        texture_index = texture_result.texture_index
         
         # Dir纹理
         dir_relative_path = f"dir/packed_lightmap_{texture_index}_dir.png"
@@ -1430,22 +1441,41 @@ def export_lightmap_converter_data(adjusted_level_left_pos, adjusted_level_right
             "absolute_path": dir_absolute_path,
             "type": "Dir", 
             "mip_level": 0,
-            "texture_index": texture_index
+            "texture_index": texture_index,
+            "lightmap_id": len(lightmap_texture_array)  # 记录在数组中的实际索引
         })
+    
+    print(f"✓ 已添加{mip0_texture_count}个mip0 Dir纹理，索引范围: {mip0_dir_start_index}-{len(lightmap_texture_array)-1}")
+    
+    # 第三步：建立物体到mip0 LQ纹理的映射（只映射到0到mip0_texture_count-1的范围）
+    for texture_result in all_results:
+        texture_index = texture_result.texture_index
         
-        # 记录每个纹理中的物体映射
+        # 记录每个纹理中的物体映射到对应的mip0 LQ纹理索引
         for i in range(texture_result.rectangle_count):
             rect = texture_result.rectangles[i]
             rect_id = rect.rectangle_id
             
             if rect_id in rectangle_id_map:
                 mesh_id = rectangle_id_map[rect_id]["mesh_id"]
-                mesh_to_lightmap_id[mesh_id] = len(lightmap_texture_array) - 2  # LQ纹理的索引
+                # 物体映射到对应的mip0 LQ纹理索引（texture_index就是在mip0中的索引）
+                lightmap_id = texture_index  # 直接使用texture_index，它应该在0到mip0_texture_count-1范围内
+                
+                if lightmap_id >= mip0_texture_count:
+                    print(f"❌ 错误：texture_index {lightmap_id} 超出mip0范围 (0-{mip0_texture_count-1})")
+                    continue
+                
+                mesh_to_lightmap_id[mesh_id] = lightmap_id
     
-    # 添加合并的mip级别纹理
+    print(f"✓ 已建立{len(mesh_to_lightmap_id)}个物体的texture ID映射，ID范围: 0-{mip0_texture_count-1}")
+    
+    # 第四步：添加各个mip级别的合并纹理（先所有LQ，后所有Dir）
     if max_mip_level > 0 and mip_organizations:
+        # 先添加所有mip级别的LQ纹理
+        mip_lq_start_index = len(lightmap_texture_array)
         for mip_level in range(1, max_mip_level + 1):
             if mip_level in mip_organizations:
+                mip_level_start = len(lightmap_texture_array)
                 for merge_key, merge_info in mip_organizations[mip_level].items():
                     merge_index = merge_info['index']
                     
@@ -1458,8 +1488,20 @@ def export_lightmap_converter_data(adjusted_level_left_pos, adjusted_level_right
                         "type": "LQ",
                         "mip_level": mip_level,
                         "merge_index": merge_index,
-                        "merge_info": merge_info
+                        "merge_info": merge_info,
+                        "lightmap_id": len(lightmap_texture_array)
                     })
+                
+                mip_level_count = len(lightmap_texture_array) - mip_level_start
+                print(f"✓ 已添加{mip_level_count}个mip{mip_level} LQ合并纹理")
+        
+        # 再添加所有mip级别的Dir纹理
+        mip_dir_start_index = len(lightmap_texture_array)
+        for mip_level in range(1, max_mip_level + 1):
+            if mip_level in mip_organizations:
+                mip_level_start = len(lightmap_texture_array)
+                for merge_key, merge_info in mip_organizations[mip_level].items():
+                    merge_index = merge_info['index']
                     
                     # Dir合并纹理
                     dir_merge_relative_path = f"dir/packed_lightmap_mip{mip_level}_{merge_index}_dir.png"
@@ -1470,8 +1512,12 @@ def export_lightmap_converter_data(adjusted_level_left_pos, adjusted_level_right
                         "type": "Dir",
                         "mip_level": mip_level,
                         "merge_index": merge_index,
-                        "merge_info": merge_info
+                        "merge_info": merge_info,
+                        "lightmap_id": len(lightmap_texture_array)
                     })
+                
+                mip_level_count = len(lightmap_texture_array) - mip_level_start  
+                print(f"✓ 已添加{mip_level_count}个mip{mip_level} Dir合并纹理")
     
     # 构建输出数据
     converter_data = {
@@ -1503,12 +1549,42 @@ def export_lightmap_converter_data(adjusted_level_left_pos, adjusted_level_right
         }
     }
     
-    print(f"✓ 导出lightmap_converter数据:")
+    print(f"✅ 导出lightmap_converter数据:")
     print(f"  - 区域边界: [{adjusted_level_left_pos[0]}, {adjusted_level_left_pos[1]}] 到 [{adjusted_level_right_pos[0]}, {adjusted_level_right_pos[1]}]")
     print(f"  - 格子数量: {grid_count_x} x {grid_count_y} (每边格子数为偶数: {grid_count_x % 2 == 0})")
-    print(f"  - 纹理总数: {len(lightmap_texture_array)} (mip0: {mip0_texture_count})")
+    print(f"  - 纹理总数: {len(lightmap_texture_array)}")
     print(f"  - 物体映射数: {len(mesh_to_lightmap_id)}")
     print(f"  - 验证通过: 区域正方形={converter_data['validation']['area_is_square']}, 格子偶数={converter_data['validation']['grid_count_is_even']}")
+    
+    # 详细显示纹理数组结构
+    print(f"📊 Texture数组结构 (总数: {len(lightmap_texture_array)}):")
+    print(f"  - mip0 LQ纹理: 索引 0-{mip0_texture_count-1} ({mip0_texture_count}个)")
+    print(f"  - mip0 Dir纹理: 索引 {mip0_texture_count}-{2*mip0_texture_count-1} ({mip0_texture_count}个)")
+    if max_mip_level > 0:
+        current_index = 2 * mip0_texture_count
+        for mip_level in range(1, max_mip_level + 1):
+            if mip_level in mip_organizations:
+                mip_count = len(mip_organizations[mip_level])
+                print(f"  - mip{mip_level} LQ纹理: 索引 {current_index}-{current_index+mip_count-1} ({mip_count}个)")
+                current_index += mip_count
+        for mip_level in range(1, max_mip_level + 1):
+            if mip_level in mip_organizations:
+                mip_count = len(mip_organizations[mip_level])
+                print(f"  - mip{mip_level} Dir纹理: 索引 {current_index}-{current_index+mip_count-1} ({mip_count}个)")
+                current_index += mip_count
+    
+    # 验证物体映射的texture ID范围
+    if mesh_to_lightmap_id:
+        actual_max_id = max(mesh_to_lightmap_id.values())
+        actual_min_id = min(mesh_to_lightmap_id.values())
+        expected_max_id = mip0_texture_count - 1
+        print(f"🎯 物体texture ID映射:")
+        print(f"  - 实际ID范围: {actual_min_id}-{actual_max_id}")
+        print(f"  - 期望ID范围: 0-{expected_max_id}")
+        if actual_max_id > expected_max_id:
+            print(f"  ❌ 警告: 发现超出预期范围的texture ID!")
+        else:
+            print(f"  ✅ texture ID范围正确")
     
     return converter_data
 
