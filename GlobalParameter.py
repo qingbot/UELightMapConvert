@@ -40,10 +40,10 @@ ALL_LIGHT_MAP_DATA = {
     "carcassonne" : {
         "source_lightmap_texture_path" : "C:/chaos_integrated_tools/data_analysis/scene/light/light_map",
         "source_lightmap_json_path" : "C:/chaos_integrated_tools/data_analysis/scene/current_scene_data.json",
-        "source_scene_xml_folder_path" : "E:\EV\dev\wolfgang\_games\proven_ground\_content\levels\LightMapScene\data_layers\default",
+        "source_scene_xml_folder_path" : "E:/EV/dev/wolfgang/_games/proven_ground/_content/levels/LightMapScene/data_layers/default",
         "lightmap_path_in_chaos_assets" : "_project/testSimpleLM/lightMaps",
         "source_terrain_xml_path" : "D:/ev/dev/chaos/_content/levels/_test/basic_level/basic_level.terrain.ast",
-        "lightmap_data_ast_path_in_chaos" : "E:\EV\dev\wolfgang\_games\proven_ground\_content\levels\lightmapscene\TestLightMapData.level_lightmap.ast.level_lightmap.ast",
+        "lightmap_data_ast_path_in_chaos" : "E:/EV/dev/wolfgang/_games/proven_ground/_content/levels/lightmapscene/TestLightMapData.level_lightmap.ast.level_lightmap.ast",
         "terrain_size_offset" : [2048,2048,1024,1024],
         "lightmap_texture_size" : 2048,
 
@@ -176,6 +176,34 @@ def load_light_map_data_from_json(json_path):
 
 DEFAULT_LIGHT_MAP_SCENE_NAME = "carcassonne"
 
+# 自动加载外部配置文件
+def _load_external_scene_config():
+    """自动加载sceneConfig文件夹中的配置文件"""
+    import json
+    import os
+    
+    config_file_path = os.path.join("sceneConfig", "sceneConfig.json")
+    
+    if os.path.exists(config_file_path):
+        try:
+            with open(config_file_path, 'r', encoding='utf-8') as f:
+                external_config = json.load(f)
+            
+            # 将外部配置合并到ALL_LIGHT_MAP_DATA中
+            for scene_name, scene_config in external_config.items():
+                ALL_LIGHT_MAP_DATA[scene_name] = scene_config
+                print(f"✓ 已从外部配置加载场景 '{scene_name}'")
+                
+            print(f"✓ 外部配置文件加载完成，共加载 {len(external_config)} 个场景配置")
+            
+        except Exception as e:
+            print(f"⚠️ 加载外部配置文件时出错: {e}")
+    else:
+        print(f"ℹ️ 未找到外部配置文件: {config_file_path}")
+
+# 在模块加载时自动执行
+_load_external_scene_config()
+
 def convert_ue_position_to_chaos_position(position):
     """
     将虚幻引擎的位置坐标转换为Chaos的坐标
@@ -201,3 +229,153 @@ def convert_ue_position_to_chaos_position(position):
     
     
     return local_location
+
+def list_all_scenes():
+    """列出所有可用的场景配置"""
+    print("=" * 60)
+    print("所有可用的场景配置:")
+    print("=" * 60)
+    
+    if not ALL_LIGHT_MAP_DATA:
+        print("未找到任何场景配置")
+        return
+    
+    # 按场景名排序
+    sorted_scenes = sorted(ALL_LIGHT_MAP_DATA.keys())
+    
+    for i, scene_name in enumerate(sorted_scenes, 1):
+        scene_config = ALL_LIGHT_MAP_DATA[scene_name]
+        print(f"\n{i:2d}. 场景名称: {scene_name}")
+        print(f"    XML路径: {scene_config.get('source_scene_xml_folder_path', 'N/A')}")
+        print(f"    JSON路径: {scene_config.get('source_lightmap_json_path', 'N/A')}")
+        print(f"    输出路径: {scene_config.get('lightmap_data_ast_path_in_chaos', 'N/A')}")
+        
+        # 显示场景边界
+        left_pos = scene_config.get('level_left_pos', [0, 0])
+        right_pos = scene_config.get('level_right_pos', [0, 0])
+        print(f"    场景边界: {left_pos} 到 {right_pos}")
+    
+    print(f"\n总共 {len(sorted_scenes)} 个场景配置")
+    print("=" * 60)
+
+def show_scene_config(scene_name):
+    """显示指定场景的详细配置"""
+    if scene_name not in ALL_LIGHT_MAP_DATA:
+        print(f"❌ 错误: 场景 '{scene_name}' 不存在")
+        print(f"可用场景: {list(ALL_LIGHT_MAP_DATA.keys())}")
+        return
+    
+    scene_config = ALL_LIGHT_MAP_DATA[scene_name]
+    
+    print("=" * 60)
+    print(f"场景配置详情: {scene_name}")
+    print("=" * 60)
+    
+    # 路径配置
+    print("\n📁 路径配置:")
+    print("-" * 40)
+    print(f"光照图纹理路径:     {scene_config.get('source_lightmap_texture_path', 'N/A')}")
+    print(f"场景JSON文件路径:   {scene_config.get('source_lightmap_json_path', 'N/A')}")
+    print(f"场景XML文件夹路径:  {scene_config.get('source_scene_xml_folder_path', 'N/A')}")
+    print(f"地形XML文件路径:    {scene_config.get('source_terrain_xml_path', 'N/A')}")
+    print(f"输出AST文件路径:    {scene_config.get('lightmap_data_ast_path_in_chaos', 'N/A')}")
+    print(f"Chaos资源路径:      {scene_config.get('lightmap_path_in_chaos_assets', 'N/A')}")
+    print(f"Chaos绝对路径:      {scene_config.get('lightmap_absolute_path', 'N/A')}")
+    print(f"原始光照图路径:     {scene_config.get('original_lightmap_absolute_path', 'N/A')}")
+    
+    # 场景范围配置
+    print("\n🗺️ 场景范围配置:")
+    print("-" * 40)
+    left_pos = scene_config.get('level_left_pos', [0, 0])
+    right_pos = scene_config.get('level_right_pos', [0, 0])
+    print(f"左下角坐标:         {left_pos}")
+    print(f"右上角坐标:         {right_pos}")
+    
+    # 计算场景大小
+    if len(left_pos) >= 2 and len(right_pos) >= 2:
+        width = abs(right_pos[0] - left_pos[0])
+        height = abs(right_pos[1] - left_pos[1])
+        print(f"场景尺寸:           {width} x {height}")
+    
+    # 纹理配置
+    print("\n🖼️ 纹理配置:")
+    print("-" * 40)
+    print(f"光照图纹理大小:     {scene_config.get('lightmap_texture_size', 'N/A')}")
+    print(f"光照图最小大小:     {scene_config.get('lightmap_texture_min_size', 'N/A')}")
+    print(f"Mip0格子数量:       {scene_config.get('lightmap_mip0_grid_count', 'N/A')} * {scene_config.get('lightmap_mip0_grid_count', 'N/A')}")
+    
+    # LOD配置
+    print("\n📏 LOD配置:")
+    print("-" * 40)
+    lod_distances = scene_config.get('lod_distance', [])
+    if lod_distances:
+        print(f"LOD距离:            {lod_distances}")
+        for i, distance in enumerate(lod_distances):
+            print(f"  - LOD {i}: {distance} 单位")
+    else:
+        print("LOD距离:            未配置")
+    
+    # 地形配置
+    print("\n🏔️ 地形配置:")
+    print("-" * 40)
+    terrain_offset = scene_config.get('terrain_size_offset', [])
+    if terrain_offset and len(terrain_offset) >= 4:
+        print(f"地形大小偏移:       {terrain_offset}")
+        print(f"  - 大小: {terrain_offset[0]} x {terrain_offset[1]}")
+        print(f"  - 偏移: {terrain_offset[2]}, {terrain_offset[3]}")
+    else:
+        print("地形大小偏移:       未配置")
+    
+    print("=" * 60)
+
+def main():
+    """主函数，处理命令行参数"""
+    import argparse
+    
+    parser = argparse.ArgumentParser(
+        description="GlobalParameter 场景配置管理工具",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+使用示例:
+  python GlobalParameter.py --list                    # 列出所有场景
+  python GlobalParameter.py --show carcassonne        # 显示carcassonne场景配置
+  python GlobalParameter.py --show-all               # 显示所有场景的详细配置
+        """
+    )
+    
+    parser.add_argument("--list", "-l", action="store_true",
+                      help="列出所有可用的场景配置")
+    
+    parser.add_argument("--show", "-s", type=str, metavar="SCENE_NAME",
+                      help="显示指定场景的详细配置")
+    
+    parser.add_argument("--show-all", action="store_true",
+                      help="显示所有场景的详细配置")
+    
+    args = parser.parse_args()
+    
+    # 如果没有提供任何参数，显示帮助信息
+    if not any(vars(args).values()):
+        parser.print_help()
+        return
+    
+    # 处理参数
+    if args.list:
+        list_all_scenes()
+    
+    elif args.show:
+        show_scene_config(args.show)
+    
+    elif args.show_all:
+        print("=" * 60)
+        print("所有场景的详细配置")
+        print("=" * 60)
+        
+        sorted_scenes = sorted(ALL_LIGHT_MAP_DATA.keys())
+        for i, scene_name in enumerate(sorted_scenes, 1):
+            if i > 1:
+                print("\n" + "=" * 60)
+            show_scene_config(scene_name)
+
+if __name__ == "__main__":
+    main()

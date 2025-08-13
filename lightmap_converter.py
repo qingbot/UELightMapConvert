@@ -5,6 +5,7 @@ import uuid
 import argparse
 import math
 from datetime import datetime
+from GlobalParameter import ALL_LIGHT_MAP_DATA
 
 # 全局调试文件句柄
 debug_file = None
@@ -1577,22 +1578,20 @@ def main():
     parser.add_argument("--verbose", "-v", action="store_true",
                       help="详细输出模式，打印更多调试信息")
     
-    parser.add_argument("--copy-textures", "-c", action="store_true",
-                      help="处理完成后自动复制光照图贴图到Chaos引擎目录")
-    
-    parser.add_argument("--xml-folder", type=str,
-                      help="XML文件夹路径（可选，如果不指定则使用默认路径）")
-    
-    parser.add_argument("--json-path", type=str,
-                      help="JSON文件路径（可选，如果不指定则使用默认路径）")
-    
-    parser.add_argument("--output-path", type=str,
-                      help="输出AST文件路径（可选，如果不指定则使用默认路径）")
+
     
     args = parser.parse_args()
     
-    # 检查场景的converter数据是否存在
+    # 获取场景名称
     scene_name = args.scene
+    
+    # 首先检查场景是否在GlobalParameter中配置
+    if scene_name not in ALL_LIGHT_MAP_DATA:
+        print(f"错误: 场景 '{scene_name}' 未在GlobalParameter中配置")
+        print(f"可用的场景: {list(ALL_LIGHT_MAP_DATA.keys())}")
+        return
+    
+    # 然后检查场景的converter数据是否存在
     converter_data = load_lightmap_converter_data(scene_name)
     if not converter_data:
         print(f"错误: 场景 '{scene_name}' 的converter数据不存在")
@@ -1603,30 +1602,19 @@ def main():
     debug_filename = init_debug_file(scene_name)
     
     try:
-        # 从converter数据中获取必要的场景配置
+        
+        # 从GlobalParameter获取场景配置
+        global_scene_config = ALL_LIGHT_MAP_DATA[scene_name]
+        
+        # 从converter数据中获取必要的场景配置（用于mip等信息）
         scene_config = extract_scene_config_from_converter_data(converter_data)
         
-        # 获取路径信息，优先使用命令行参数
-        xml_folder_path = args.xml_folder or scene_config["source_scene_xml_folder_path"]
-        json_path = args.json_path or scene_config["source_lightmap_json_path"]
-        output_path = args.output_path or scene_config["lightmap_data_ast_path_in_chaos"]
-        lightmap_path = scene_config["lightmap_path_in_chaos_assets"]
-        
-        # 如果路径仍然是默认的"."，尝试从当前目录推断
-        if xml_folder_path == ".":
-            # 尝试使用合理的默认路径
-            xml_folder_path = "."  # 当前目录
-            print("⚠️  使用当前目录作为XML文件夹，请确保当前目录下有.ast文件")
-        
-        if json_path == ".":
-            # 使用场景名称推断JSON路径
-            json_path = f"test_scene_data_{scene_name}.json"
-            print(f"⚠️  使用推断的JSON路径: {json_path}")
-        
-        if output_path == "output_lightmap.ast":
-            # 使用场景名称生成输出路径
-            output_path = f"output_lightmap_{scene_name}.ast"
-            print(f"使用生成的输出路径: {output_path}")
+        # 使用GlobalParameter中的路径配置
+        xml_folder_path = global_scene_config["source_scene_xml_folder_path"]
+        json_path = global_scene_config["source_lightmap_json_path"]
+        output_path = global_scene_config["lightmap_data_ast_path_in_chaos"]
+        lightmap_path = global_scene_config["lightmap_path_in_chaos_assets"]
+
 
         print(f"\n处理场景: {scene_name}")
         print(f"XML文件夹路径: {xml_folder_path}")
@@ -1776,27 +1764,24 @@ def main():
         # 创建lightmap XML，包含地形数据
         create_or_update_lightmap_xml(all_matches, output_path, lightmap_path, terrain_data, scene_config, scene_name)
         
-        # 复制光照图贴图到Chaos引擎目录（如果启用）
-        if args.copy_textures:
-            print("\n=== 复制光照图贴图到Chaos引擎 ===")
-            try:
-                # 导入复制函数
-                from run_texture_tools import copy_lightmap_textures_to_chaos
+        # 自动复制光照图贴图到Chaos引擎目录
+        print("\n=== 复制光照图贴图到Chaos引擎 ===")
+        try:
+            # 导入复制函数
+            from run_texture_tools import copy_lightmap_textures_to_chaos
+            
+            # 执行复制
+            copy_success = copy_lightmap_textures_to_chaos(scene_name)
+            
+            if copy_success:
+                print("✅ 光照图贴图复制完成")
+            else:
+                print("❌ 光照图贴图复制失败")
                 
-                # 执行复制
-                copy_success = copy_lightmap_textures_to_chaos(scene_name)
-                
-                if copy_success:
-                    print("✅ 光照图贴图复制完成")
-                else:
-                    print("❌ 光照图贴图复制失败")
-                    
-            except Exception as e:
-                print(f"❌ 复制光照图贴图时出错: {e}")
-                import traceback
-                traceback.print_exc()
-        else:
-            print("\n提示: 使用 --copy-textures 参数可以自动复制光照图贴图到Chaos引擎目录")
+        except Exception as e:
+            print(f"❌ 复制光照图贴图时出错: {e}")
+            import traceback
+            traceback.print_exc()
         
         # 生成最终的完整调试报告
         generate_final_debug_report(
