@@ -890,26 +890,24 @@ def create_or_update_lightmap_xml(matches, output_path, lightmap_path, terrain_d
             print(f"  - lightmap_area (Chaos坐标): ({chaos_left[0]:.2f}, {chaos_left[1]:.2f}) to ({chaos_right[0]:.2f}, {chaos_right[1]:.2f})")
             
             # 输出新增的元素信息
-            lod_distance = scene_config.get("lod_distance", [])
+            runtime_distances = scene_config.get("lightmap_runtime_mip_distances", [])
             mip0_texture_size = scene_config.get("mip0_texture_size")
             max_mip_level = scene_config.get("max_mip_level", 0)
             
-            if lod_distance:
+            # 显示运行时距离配置
+            if runtime_distances:
                 # 显示虚幻和Chaos的值（转换为整数）
-                chaos_distances = [int(d / 100.0) for d in lod_distance]
-                print(f"  - lightmap_mip_distance (UE厘米): {lod_distance}")
+                chaos_distances = [int(d / 100.0) for d in runtime_distances]
+                print(f"  - lightmap_mip_distance (运行时加载距离, UE厘米): {runtime_distances}")
                 print(f"  - lightmap_mip_distance (Chaos米，整数): {chaos_distances}")
+            else:
+                print("  - ⚠️ lightmap_mip_distance: 未配置运行时距离")
+                
             if mip0_texture_size is not None:
                 # 显示虚幻和Chaos的值（转换为整数）
                 chaos_texture_size = int(mip0_texture_size / 100.0)
                 print(f"  - lightmap_mip0_grid_size (UE厘米): {mip0_texture_size}")
                 print(f"  - lightmap_mip0_grid_size (Chaos米，整数): {chaos_texture_size}")
-                if lod_distance and mip0_texture_size > 0:
-                    # 使用转换后的Chaos单位进行计算
-                    first_lod_distance_chaos = lod_distance[0] / 100.0
-                    mip0_texture_size_chaos = mip0_texture_size / 100.0
-                    side_grid_number = math.ceil(first_lod_distance_chaos / mip0_texture_size_chaos)
-                    print(f"  - lightmap_mip0_side_grid_number: {side_grid_number}")
             print(f"  - mip_number: {max_mip_level + 1}")
         
     except Exception as e:
@@ -993,14 +991,16 @@ def create_new_xml_structure(lightmap_path, scene_config=None, lightmap_texture_
     
     # 添加新的lightmap相关元素
     if scene_config:
-        # 添加lightmap_mip_distance数组，值来自lod_distance（虚幻厘米转Chaos米，除以100）
-        lod_distance = scene_config.get("lod_distance", [])
-        if lod_distance:
+        # 添加lightmap_mip_distance数组，值来自lightmap_runtime_mip_distances（运行时加载距离）
+        runtime_distances = scene_config.get("lightmap_runtime_mip_distances", [])
+        if runtime_distances:
             lightmap_mip_distance = ET.SubElement(root, "lightmap_mip_distance")
-            for distance in lod_distance:
+            for distance in runtime_distances:
                 element = ET.SubElement(lightmap_mip_distance, "element", {"sketum_id": generate_sketum_id()})
                 # 虚幻引擎厘米转Chaos引擎米，除以100，转为正整数
                 element.text = str(int(distance / 100.0))
+        else:
+            print("⚠️ 警告: 未配置lightmap_runtime_mip_distances，lightmap_mip_distance标签将不会被添加")
         
         # 添加lightmap_mip0_grid_size，值是mip0_texture_size（虚幻厘米转Chaos米，除以100）
         mip0_texture_size = scene_config.get("mip0_texture_size")
@@ -1009,29 +1009,25 @@ def create_new_xml_structure(lightmap_path, scene_config=None, lightmap_texture_
             # 虚幻引擎厘米转Chaos引擎米，除以100，转为正整数
             lightmap_mip0_grid_size.text = str(int(mip0_texture_size / 100.0))
         
-        # 优先从converter数据获取lightmap_mip0_side_grid_number
+        # 从converter数据获取lightmap_mip0_side_grid_number
         side_grid_number = None
         if scene_name:
             converter_data = load_lightmap_converter_data(scene_name)
             if converter_data:
                 side_grid_number = converter_data.get('lightmap_mip0_side_grid_number')
                 debug_print(f"从converter数据获取side_grid_number: {side_grid_number}")
-        
-        # 如果没有converter数据，使用旧的计算方法
-        if side_grid_number is None and lod_distance and mip0_texture_size and mip0_texture_size > 0:
-            # 两个值都转换为Chaos单位进行计算
-            first_lod_distance_chaos = lod_distance[0] / 100.0  # 转为Chaos米单位
-            mip0_texture_size_chaos = mip0_texture_size / 100.0  # 转为Chaos米单位
-            side_grid_number = math.ceil(first_lod_distance_chaos / mip0_texture_size_chaos)
-            debug_print(f"使用旧方法计算side_grid_number: {side_grid_number}")
-        
-        # 验证side_grid_number必须为偶数
-        if side_grid_number is not None:
-            if side_grid_number % 2 != 0:
-                print(f"⚠️  警告: side_grid_number ({side_grid_number}) 不是偶数，四叉树管理可能有问题")
-            
-            lightmap_mip0_side_grid_number = ET.SubElement(root, "lightmap_mip0_side_grid_number")
-            lightmap_mip0_side_grid_number.text = str(side_grid_number)
+                
+                # 验证side_grid_number必须为偶数
+                if side_grid_number is not None:
+                    if side_grid_number % 2 != 0:
+                        print(f"⚠️  警告: side_grid_number ({side_grid_number}) 不是偶数，四叉树管理可能有问题")
+                    
+                    lightmap_mip0_side_grid_number = ET.SubElement(root, "lightmap_mip0_side_grid_number")
+                    lightmap_mip0_side_grid_number.text = str(side_grid_number)
+            else:
+                print("⚠️ 警告: 没有converter数据，无法设置lightmap_mip0_side_grid_number")
+        else:
+            print("⚠️ 警告: 未指定场景名称，无法获取converter数据")
         
         # 添加mip_number，值是max_mip_level + 1（因为mip等级从0开始计算）
         max_mip_level = scene_config.get("max_mip_level", 0)
@@ -1554,13 +1550,28 @@ def extract_scene_config_from_converter_data(converter_data):
         # 地形相关 - 默认值
         "terrain_size_offset": [512, 512, 512, 512],
         "mip0_texture_size": area_bounds.get("grid_size", 1024),
-        "lod_distance": [area_bounds.get("grid_size", 1024)],  # 使用格子大小作为LOD距离
+        
+        # 运行时距离配置 - 默认值，建议用户在GlobalParameter中配置
+        "lightmap_runtime_mip_distances": [area_bounds.get("grid_size", 1024) * 10, 
+                                          area_bounds.get("grid_size", 1024) * 20,
+                                          area_bounds.get("grid_size", 1024) * 40,
+                                          area_bounds.get("grid_size", 1024) * 80],  # 基于格子大小的合理运行时距离
     }
     
     print(f"✓ 从converter数据提取场景配置:")
     print(f"  - 区域边界: {scene_config['level_left_pos']} 到 {scene_config['level_right_pos']}")
     print(f"  - 格子数量: {scene_config['grid_count_x']} x {scene_config['grid_count_y']}")
+    print(f"  - 格子大小: {scene_config['mip0_texture_size']} (用于lightmap_mip0_grid_size)")
     print(f"  - Mip级别: {scene_config['max_mip_level']}")
+    
+    # 显示运行时距离配置
+    runtime_distances = scene_config.get('lightmap_runtime_mip_distances', [])
+    if runtime_distances:
+        chaos_runtime_distances = [int(d / 100.0) for d in runtime_distances]
+        print(f"  - 运行时加载距离 (UE厘米): {runtime_distances}")
+        print(f"  - 运行时加载距离 (Chaos米): {chaos_runtime_distances}")
+    else:
+        print(f"  - ⚠️ 未配置运行时距离，将使用LOD距离作为后备")
     
     return scene_config
 
@@ -1630,6 +1641,12 @@ def main():
         
         # 从converter数据中获取必要的场景配置（用于mip等信息）
         scene_config = extract_scene_config_from_converter_data(converter_data)
+        
+        # 合并GlobalParameter中的重要配置到scene_config
+        # 运行时距离配置优先使用GlobalParameter中的配置
+        if "lightmap_runtime_mip_distances" in global_scene_config:
+            scene_config["lightmap_runtime_mip_distances"] = global_scene_config["lightmap_runtime_mip_distances"]
+            print(f"✓ 从GlobalParameter加载运行时距离配置: {global_scene_config['lightmap_runtime_mip_distances']}")
         
         # 使用GlobalParameter中的路径配置
         xml_folder_path = global_scene_config["source_scene_xml_folder_path"]

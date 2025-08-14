@@ -11,8 +11,8 @@
         "lightmap_texture_min_size": 16,
         "level_left_pos": [-1024, -1024],
         "level_right_pos": [1024, 1024],
-        "lod_distance": [100, 200, 400, 800],
         "lightmap_mip0_grid_count": 8,
+        "lightmap_runtime_mip_distances": [1000, 2000, 4000, 8000],
         "lightmap_absolute_path": "C:/path/to/chaos/lightmaps",
         "original_lightmap_absolute_path": "C:/path/to/original/lightmaps"
     },
@@ -29,8 +29,8 @@
         "lightmap_texture_min_size": 16,
         "level_left_pos": [-2048, -2048],
         "level_right_pos": [2048, 2048],
-        "lod_distance": [200, 400, 800],
         "lightmap_mip0_grid_count": 16,
+        "lightmap_runtime_mip_distances": [2000, 4000, 8000, 16000],
         "lightmap_absolute_path": "D:/MyProject/chaos/lightmaps",
         "original_lightmap_absolute_path": "D:/MyProject/original/lightmaps"
     }

@@ -25,11 +25,14 @@ ALL_LIGHT_MAP_DATA = {
         # 场景的右上角在世界坐标系中的位置
         "level_right_pos" : [1024,1024], 
 
-        # 各级lod的最远距离
-        "lod_distance" : [100,200,400,800],
+
         # mip0 一张贴图的边长对应的世界边长，mip1 是其二倍，以此类推
         # mip0_texture_size已移除，改为用户直接指定mip0格子数量
         "lightmap_mip0_grid_count": 8,  # mip0级别的n×n格子数中的n值 (必须是2的整数次幂: 2,4,8,16,32...)
+        
+        # 运行时lightmap加载距离数组，将写入ast的lightmap_mip_distance标签
+        # 这是纯粹的运行时加载距离，与计算格子大小无关
+        "lightmap_runtime_mip_distances": [1000, 2000, 4000, 8000],  # 运行时各mip级别的加载距离（虚幻厘米单位）
 
         # CHAOS中Lightmap所在的绝对路径
         "lightmap_absolute_path" : "D:/ev/dev/wolfgang/_games/proven_ground/_content/New Folder1/lightMaps",
@@ -56,11 +59,14 @@ ALL_LIGHT_MAP_DATA = {
         # 场景的右上角在世界坐标系中的位置
         "level_right_pos" : [30000,100000], 
 
-        # 各级lod的最远距离
-        "lod_distance" : [12500],
+
         # mip0 一张贴图的边长对应的世界边长
         # mip0_texture_size已移除，改为用户直接指定mip0格子数量  
         "lightmap_mip0_grid_count": 8,  # mip0级别的n×n格子数中的n值 (必须是2的整数次幂: 2,4,8,16,32...)
+        
+        # 运行时lightmap加载距离数组，将写入ast的lightmap_mip_distance标签
+        # 这是纯粹的运行时加载距离，与计算格子大小无关
+        "lightmap_runtime_mip_distances": [5000, 10000, 20000, 40000],  # 运行时各mip级别的加载距离（虚幻厘米单位）
 
         "lightmap_absolute_path" : "E:/EV/dev/wolfgang/_games/proven_ground/_content/testSimpleLM/lightMaps",
         "original_lightmap_absolute_path" : "C:/chaos_integrated_tools/data_analysis/scene/light/light_map/BigLightmap"
@@ -304,16 +310,16 @@ def show_scene_config(scene_name):
     print(f"光照图最小大小:     {scene_config.get('lightmap_texture_min_size', 'N/A')}")
     print(f"Mip0格子数量:       {scene_config.get('lightmap_mip0_grid_count', 'N/A')} * {scene_config.get('lightmap_mip0_grid_count', 'N/A')}")
     
-    # LOD配置
-    print("\n📏 LOD配置:")
+    # 运行时距离配置
+    print("\n🚀 运行时加载距离配置:")
     print("-" * 40)
-    lod_distances = scene_config.get('lod_distance', [])
-    if lod_distances:
-        print(f"LOD距离:            {lod_distances}")
-        for i, distance in enumerate(lod_distances):
-            print(f"  - LOD {i}: {distance} 单位")
+    runtime_distances = scene_config.get('lightmap_runtime_mip_distances', [])
+    if runtime_distances:
+        print(f"运行时距离:         {runtime_distances}")
+        for i, distance in enumerate(runtime_distances):
+            print(f"  - Mip {i}: {distance} 厘米")
     else:
-        print("LOD距离:            未配置")
+        print("运行时距离:         未配置")
     
     # 地形配置
     print("\n🏔️ 地形配置:")

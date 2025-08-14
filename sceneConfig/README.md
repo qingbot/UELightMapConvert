@@ -26,7 +26,7 @@
         "lightmap_texture_min_size": 16,
         "level_left_pos": [-1024, -1024],
         "level_right_pos": [1024, 1024],
-        "lod_distance": [100, 200, 400, 800],
+        "lightmap_runtime_mip_distances": [1000, 2000, 4000, 8000],
         "lightmap_mip0_grid_count": 8,
         "lightmap_absolute_path": "Chaos引擎光照图绝对路径",
         "original_lightmap_absolute_path": "原始光照图绝对路径"
@@ -79,8 +79,8 @@ python lightmap_converter.py --scene non_existing_scene
 | `lightmap_texture_min_size` | 数字 | 光照图纹理最小大小 |
 | `level_left_pos` | 数组 | 场景左下角世界坐标 [x, y] |
 | `level_right_pos` | 数组 | 场景右上角世界坐标 [x, y] |
-| `lod_distance` | 数组 | 各级LOD距离数组 |
 | `lightmap_mip0_grid_count` | 数字 | mip0级别的格子数量（必须是2的整数次幂） |
+| `lightmap_runtime_mip_distances` | 数组 | 运行时lightmap加载距离数组（虚幻厘米单位） |
 | `lightmap_absolute_path` | 字符串 | Chaos引擎中光照图的绝对路径 |
 | `original_lightmap_absolute_path` | 字符串 | 原始光照图的绝对路径 |
 

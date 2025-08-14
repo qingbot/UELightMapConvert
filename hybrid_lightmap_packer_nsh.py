@@ -144,15 +144,6 @@ def generate_world_single_area_size_and_adjusted_bounds_from_user_grid_count(use
     
     return integer_grid_size, adjusted_level_left_pos, adjusted_level_right_pos, user_grid_count, user_grid_count, max_mip_level
 
-def generate_world_single_area_size(lod_distance):
-    """保持向后兼容的函数，只返回格子大小"""
-    # 计算每个LOD距离的加权值
-    weighted_values = []
-    for i, distance in enumerate(lod_distance):
-        weight = 1.0 / (2 ** i)  # 第0位乘以1，第1位乘以0.5，第2位乘以0.25，以此类推
-        weighted_values.append(distance * weight)
-        
-    return max(weighted_values)
 
 def create_placeholder_texture(texture_size, lightmap_base_dir):
     """创建占位纹理文件
