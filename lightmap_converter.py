@@ -52,6 +52,27 @@ def format_float(value):
     """格式化浮点数,保持最大精度""" 
     return f"{value:.6f}"
 
+def convert_url_path_for_ast(url_path):
+    """
+    转换URL路径用于AST文件写入
+    
+    Args:
+        url_path: 原始的URL路径
+        
+    Returns:
+        str: 转换后的路径（转换为小写并将/替换为\）
+    """
+    if not url_path:
+        return url_path
+    
+    # 转换为小写
+    converted_path = url_path.lower()
+    
+    # 将所有的/替换为\
+    converted_path = converted_path.replace('/', '\\')
+    
+    return converted_path
+
 def read_xml_objects(xml_path):
     """
     从XML文件中读取所有物体信息，包括名字和position
@@ -632,7 +653,7 @@ def collect_all_unmatched_objects(xml_files, json_objects):
     
     return all_unmatched_xml, all_unmatched_json
 
-def create_lightmap_element(data_ref, lightmap_data, lightmap_id):
+def create_lightmap_element(data_ref, lightmap_data, lightmap_id, converter_data=None, xml_name=None):
     """
     创建一个lightmap元素
     
@@ -640,6 +661,8 @@ def create_lightmap_element(data_ref, lightmap_data, lightmap_id):
         data_ref: 目标的data_ref
         lightmap_data: 光照图数据（必须包含有效数据）
         lightmap_id: 光照图在lightmap_texture数组中的ID
+        converter_data: converter数据（包含更新后的BiasScale）
+        xml_name: XML物体名称（用于匹配converter数据）
         
     Returns:
         Element: 创建的lightmap元素
@@ -721,20 +744,36 @@ def create_lightmap_element(data_ref, lightmap_data, lightmap_id):
         debug_print(f"最终CoefScale字符串: {coef_scale_value}", False)
         coef_scale.text = coef_scale_value
     
-    # 在data容器内添加BiasScale元素 - 如果存在的话
-    if "BiasScale" in lightmap_data:
-        bias_scale = ET.SubElement(data, "BiasScale")
+    # 在data容器内添加BiasScale元素 - 优先使用converter数据中的更新后BiasScale
+    bias_scale_values = None
+    
+    # 首先尝试从converter数据中获取更新后的BiasScale
+    if converter_data and "updated_lightmap_info" in converter_data and xml_name:
+        updated_info = converter_data["updated_lightmap_info"]
+        # 尝试通过xml_name精确匹配对应的物体
+        if xml_name in updated_info:
+            lightmap_info = updated_info[xml_name]
+            if "new_bias_scale" in lightmap_info and isinstance(lightmap_info["new_bias_scale"], list):
+                bias_scale_values = lightmap_info["new_bias_scale"][:4]
+                debug_print(f"从converter数据获取物体'{xml_name}'的更新BiasScale: {bias_scale_values}", False)
+        else:
+            debug_print(f"在converter数据中未找到物体'{xml_name}'的更新BiasScale", False)
+    
+    # 如果converter数据中没有，则使用原始JSON中的BiasScale
+    if bias_scale_values is None and "BiasScale" in lightmap_data:
         if isinstance(lightmap_data["BiasScale"], list) and len(lightmap_data["BiasScale"]) > 0:
             if len(lightmap_data["BiasScale"]) >= 4:
                 bias_scale_values = lightmap_data["BiasScale"][:4]
             else:
                 bias_scale_values = list(lightmap_data["BiasScale"]) + [0.0] * (4 - len(lightmap_data["BiasScale"]))
-            bias_scale_value = " ".join([format_float(val) for val in bias_scale_values])
-            bias_scale.text = bias_scale_value
-        else:
-            # BiasScale存在但不是有效的列表，跳过
-            debug_print(f"BiasScale存在但数据无效，跳过", False)
-            data.remove(bias_scale)
+            debug_print(f"使用原始JSON中的BiasScale: {bias_scale_values}", False)
+    
+    # 如果找到有效的BiasScale值，则添加到XML中
+    if bias_scale_values:
+        bias_scale = ET.SubElement(data, "BiasScale")
+        bias_scale_value = " ".join([format_float(val) for val in bias_scale_values])
+        bias_scale.text = bias_scale_value
+        debug_print(f"最终使用的BiasScale: {bias_scale_value}", False)
     
     # 在data容器内添加LightMapID元素，使用传入的lightmap_id
     light_map_id = ET.SubElement(data, "LightMapID")
@@ -767,8 +806,13 @@ def create_or_update_lightmap_xml(matches, output_path, lightmap_path, terrain_d
             debug_print(f"构建完成，共 {len(lightmap_texture_array)} 个纹理")
         
         # 加载打包结果以获取物体与lightmap_id的映射
+        converter_data = None
         if scene_name:
-            mesh_to_lightmap_id = load_packing_results(scene_name)
+            converter_data = load_lightmap_converter_data(scene_name)
+            if converter_data:
+                mesh_to_lightmap_id = converter_data.get('mesh_to_lightmap_id', {})
+            else:
+                mesh_to_lightmap_id = load_packing_results(scene_name)
         
         # 直接创建新的XML结构，不考虑向后兼容
         print(f"创建新的XML文件: {output_path}")
@@ -806,7 +850,7 @@ def create_or_update_lightmap_xml(matches, output_path, lightmap_path, terrain_d
                     
                     debug_print(f"物体 {xml_name} 使用默认lightmap_id: {lightmap_id}")
                 
-                element = create_lightmap_element(match["data_ref"], match["lightmap_data"], lightmap_id)
+                element = create_lightmap_element(match["data_ref"], match["lightmap_data"], lightmap_id, converter_data, xml_name)
                 if element is not None:  # 只有成功创建元素时才添加
                     lightmap_data.append(element)
                     added_count += 1
@@ -1222,8 +1266,10 @@ def create_terrain_lightmap_element(terrain_data, lightmap_path, scene_config):
     # 创建url元素
     url = ET.SubElement(light_map, "url")
     combine_name = terrain_data["combine_name"]
-    url.text = f"{lightmap_path}/{combine_name}.texture.ast"
-    debug_print(f"LightMap URL: {url.text}")
+    original_url = f"{lightmap_path}/{combine_name}.texture.ast"
+    url.text = convert_url_path_for_ast(original_url)
+    debug_print(f"LightMap URL (原始): {original_url}")
+    debug_print(f"LightMap URL (转换后): {url.text}")
     
     # 创建guid和parameter元素
     guid = ET.SubElement(light_map, "guid")
@@ -1405,7 +1451,7 @@ def create_lightmap_texture_element(url, guid):
     
     # 添加url元素
     url_elem = ET.SubElement(element, "url")
-    url_elem.text = url
+    url_elem.text = convert_url_path_for_ast(url)
     
     # 添加guid元素
     guid_elem = ET.SubElement(element, "guid")

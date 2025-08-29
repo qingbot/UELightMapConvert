@@ -1222,10 +1222,10 @@ def global_packing_optimization(groups):
                 "texture_index": texture_idx,
                 "new_lq": f"packed_lightmap_{texture_idx}",
                 "new_bias_scale": [
-                    positions[i][0] / TextureSize,
-                    positions[i][1] / TextureSize,
-                    group_info['sizes'][i][0] * scale / TextureSize,
-                    group_info['sizes'][i][1] * scale / TextureSize
+                    (positions[i][0] + 1) / TextureSize,                           # bias_u (+1边界处理)
+                    (positions[i][1] + 1) / TextureSize,                           # bias_v (+1边界处理)
+                    (group_info['sizes'][i][0] * scale - 2) / TextureSize,         # scale_u (-2边界处理)
+                    (group_info['sizes'][i][1] * scale - 2) / TextureSize          # scale_v (-2边界处理)
                 ],
                 "scale_factor": scale,
                 "position": positions[i],
@@ -1323,10 +1323,10 @@ def find_global_optimal_solution(groups):
                 "texture_index": texture_idx,
                 "new_lq": f"packed_lightmap_{texture_idx}",
                 "new_bias_scale": [
-                    positions[i][0] / TextureSize,
-                    positions[i][1] / TextureSize,
-                    group_info['sizes'][i][0] * scale / TextureSize,
-                    group_info['sizes'][i][1] * scale / TextureSize
+                    (positions[i][0] + 1) / TextureSize,                           # bias_u (+1边界处理)
+                    (positions[i][1] + 1) / TextureSize,                           # bias_v (+1边界处理)
+                    (group_info['sizes'][i][0] * scale - 2) / TextureSize,         # scale_u (-2边界处理)
+                    (group_info['sizes'][i][1] * scale - 2) / TextureSize          # scale_v (-2边界处理)
                 ],
                 "scale_factor": scale,
                 "position": positions[i],

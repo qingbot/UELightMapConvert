@@ -59,14 +59,13 @@ ALL_LIGHT_MAP_DATA = {
         # 场景的右上角在世界坐标系中的位置
         "level_right_pos" : [30000,100000], 
 
-
         # mip0 一张贴图的边长对应的世界边长
         # mip0_texture_size已移除，改为用户直接指定mip0格子数量  
         "lightmap_mip0_grid_count": 8,  # mip0级别的n×n格子数中的n值 (必须是2的整数次幂: 2,4,8,16,32...)
         
         # 运行时lightmap加载距离数组，将写入ast的lightmap_mip_distance标签
         # 这是纯粹的运行时加载距离，与计算格子大小无关
-        "lightmap_runtime_mip_distances": [5000, 10000, 20000, 40000],  # 运行时各mip级别的加载距离（虚幻厘米单位）
+        "lightmap_runtime_mip_distances": [10000, 20000, 40000, 80000],  # 运行时各mip级别的加载距离（虚幻厘米单位）
 
         "lightmap_absolute_path" : "E:/EV/dev/wolfgang/_games/proven_ground/_content/testSimpleLM/lightMaps",
         "original_lightmap_absolute_path" : "C:/chaos_integrated_tools/data_analysis/scene/light/light_map/BigLightmap"
@@ -309,7 +308,7 @@ def show_scene_config(scene_name):
     print(f"光照图纹理大小:     {scene_config.get('lightmap_texture_size', 'N/A')}")
     print(f"光照图最小大小:     {scene_config.get('lightmap_texture_min_size', 'N/A')}")
     print(f"Mip0格子数量:       {scene_config.get('lightmap_mip0_grid_count', 'N/A')} * {scene_config.get('lightmap_mip0_grid_count', 'N/A')}")
-    
+     
     # 运行时距离配置
     print("\n🚀 运行时加载距离配置:")
     print("-" * 40)

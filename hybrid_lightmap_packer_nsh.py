@@ -1372,7 +1372,7 @@ def process_and_save_packed_textures(results, group_rectangles, texture_size=409
 def export_lightmap_converter_data(adjusted_level_left_pos, adjusted_level_right_pos, 
                                   grid_size, grid_count_x, grid_count_y,
                                   all_results, mip_organizations, max_mip_level, 
-                                  scene_name, bigmap_dir):
+                                  scene_name, bigmap_dir, updated_lightmap_info=None):
     """导出lightmap_converter需要的数据
     
     Args:
@@ -1530,6 +1530,7 @@ def export_lightmap_converter_data(adjusted_level_left_pos, adjusted_level_right
         },
         "lightmap_texture_array": lightmap_texture_array,
         "mesh_to_lightmap_id": mesh_to_lightmap_id,
+        "updated_lightmap_info": updated_lightmap_info or {},  # 保存更新后的lightmap信息
         "bigmap_directory": bigmap_dir,
         "generation_timestamp": datetime.now().isoformat(),
         "validation": {
@@ -1804,7 +1805,23 @@ def process_staticmesh_lightmap(args, scene_data, json_data, output_dir):
         all_results = []
         updated_lightmap_info = {}
         
-        for grid_key, rectangles in group_rectangles.items():
+        # 按空间位置排序格子（从左到右，从下到上）
+        def parse_grid_key_for_sorting(grid_key):
+            """解析格子键，返回(grid_y, grid_x)用于排序"""
+            parts = grid_key.replace("grid_", "").split("_")
+            return int(parts[1]), int(parts[0])  # (grid_y, grid_x) 确保从下到上，从左到右
+
+        sorted_grid_items = sorted(
+            group_rectangles.items(), 
+            key=lambda item: parse_grid_key_for_sorting(item[0])
+        )
+        
+        print(f"格子处理顺序（从左到右，从下到上）：")
+        for i, (grid_key, _) in enumerate(sorted_grid_items):
+            parts = grid_key.replace("grid_", "").split("_")
+            print(f"  第{i}个纹理 -> {grid_key} (x={parts[0]}, y={parts[1]})")
+        
+        for grid_key, rectangles in sorted_grid_items:
             if not rectangles:
                 continue
                 
@@ -1930,7 +1947,7 @@ def process_staticmesh_lightmap(args, scene_data, json_data, output_dir):
             adjusted_level_left_pos, adjusted_level_right_pos, 
             grid_size, grid_count_x, grid_count_y,
             all_results, mip_organizations, max_mip_level, 
-            args.scene, bigmap_dir
+            args.scene, bigmap_dir, updated_lightmap_info
         )
         
         # 保存到JSON文件
