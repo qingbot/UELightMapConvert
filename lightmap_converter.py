@@ -1046,12 +1046,31 @@ def create_new_xml_structure(lightmap_path, scene_config=None, lightmap_texture_
         else:
             print("⚠️ 警告: 未配置lightmap_runtime_mip_distances，lightmap_mip_distance标签将不会被添加")
         
-        # 添加lightmap_mip0_grid_size，值是mip0_texture_size（虚幻厘米转Chaos米，除以100）
-        mip0_texture_size = scene_config.get("mip0_texture_size")
-        if mip0_texture_size is not None:
+        # 添加lightmap_mip0_grid_size，从converter数据获取Vector4格式的格子大小
+        grid_size_vector4 = None
+        if scene_name:
+            converter_data = load_lightmap_converter_data(scene_name)
+            if converter_data and "area_bounds" in converter_data and "grid_size" in converter_data["area_bounds"]:
+                # 获取Vector4格式的grid_size [x, y, 0.0, 0.0]
+                grid_size_array = converter_data["area_bounds"]["grid_size"]
+                if isinstance(grid_size_array, list) and len(grid_size_array) >= 4:
+                    # 将虚幻引擎厘米转换为Chaos引擎米（除以100）
+                    grid_size_vector4 = [grid_size_array[0] / 100.0, grid_size_array[1] / 100.0, 
+                                        grid_size_array[2] / 100.0, grid_size_array[3] / 100.0]
+        
+        # 如果没有从converter数据获取到，则使用备用方法
+        if grid_size_vector4 is None:
+            mip0_texture_size = scene_config.get("mip0_texture_size")
+            if mip0_texture_size is not None:
+                # 使用旧方法，生成正方形格子的Vector4
+                chaos_size = mip0_texture_size / 100.0
+                grid_size_vector4 = [chaos_size, chaos_size, 0.0, 0.0]
+        
+        # 写入lightmap_mip0_grid_size，使用Vector4格式
+        if grid_size_vector4 is not None:
             lightmap_mip0_grid_size = ET.SubElement(root, "lightmap_mip0_grid_size")
-            # 虚幻引擎厘米转Chaos引擎米，除以100，转为正整数
-            lightmap_mip0_grid_size.text = str(int(mip0_texture_size / 100.0))
+            lightmap_mip0_grid_size.text = " ".join([format_float(val) for val in grid_size_vector4])
+            print(f"✓ lightmap_mip0_grid_size: [{grid_size_vector4[0]:.6f}, {grid_size_vector4[1]:.6f}, {grid_size_vector4[2]:.6f}, {grid_size_vector4[3]:.6f}]")
         
         # 从converter数据获取lightmap_mip0_side_grid_number
         side_grid_number = None
@@ -1585,7 +1604,9 @@ def extract_scene_config_from_converter_data(converter_data):
         # 区域和格子相关 - 从converter数据获取
         "level_left_pos": area_bounds.get("left_pos", [0, 0]),
         "level_right_pos": area_bounds.get("right_pos", [0, 0]),
-        "grid_size": area_bounds.get("grid_size", 1024),
+        "grid_size_x": area_bounds.get("grid_size_x", 1024),
+        "grid_size_y": area_bounds.get("grid_size_y", 1024),
+        "grid_size": area_bounds.get("grid_size", [1024, 1024, 0, 0]),  # Vector4格式
         "grid_count_x": area_bounds.get("grid_count_x", 2),
         "grid_count_y": area_bounds.get("grid_count_y", 2),
         
@@ -1595,19 +1616,20 @@ def extract_scene_config_from_converter_data(converter_data):
         
         # 地形相关 - 默认值
         "terrain_size_offset": [512, 512, 512, 512],
-        "mip0_texture_size": area_bounds.get("grid_size", 1024),
+        "mip0_texture_size": area_bounds.get("grid_size_x", 1024),  # 使用X方向的格子大小作为参考
         
         # 运行时距离配置 - 默认值，建议用户在GlobalParameter中配置
-        "lightmap_runtime_mip_distances": [area_bounds.get("grid_size", 1024) * 10, 
-                                          area_bounds.get("grid_size", 1024) * 20,
-                                          area_bounds.get("grid_size", 1024) * 40,
-                                          area_bounds.get("grid_size", 1024) * 80],  # 基于格子大小的合理运行时距离
+        "lightmap_runtime_mip_distances": [area_bounds.get("grid_size_x", 1024) * 10, 
+                                          area_bounds.get("grid_size_x", 1024) * 20,
+                                          area_bounds.get("grid_size_x", 1024) * 40,
+                                          area_bounds.get("grid_size_x", 1024) * 80],  # 基于X方向格子大小的合理运行时距离
     }
     
     print(f"✓ 从converter数据提取场景配置:")
     print(f"  - 区域边界: {scene_config['level_left_pos']} 到 {scene_config['level_right_pos']}")
     print(f"  - 格子数量: {scene_config['grid_count_x']} x {scene_config['grid_count_y']}")
-    print(f"  - 格子大小: {scene_config['mip0_texture_size']} (用于lightmap_mip0_grid_size)")
+    print(f"  - 格子大小: X={scene_config['grid_size_x']:.6f}, Y={scene_config['grid_size_y']:.6f}")
+    print(f"  - Vector4格子大小: {scene_config['grid_size']} (用于lightmap_mip0_grid_size)")
     print(f"  - Mip级别: {scene_config['max_mip_level']}")
     
     # 显示运行时距离配置

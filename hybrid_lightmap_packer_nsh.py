@@ -83,7 +83,7 @@ def validate_user_grid_count(grid_count):
     return True
 
 def generate_world_single_area_size_and_adjusted_bounds_from_user_grid_count(user_grid_count, level_left_pos, level_right_pos):
-    """基于用户指定的mip0格子数量计算世界区域和格子大小
+    """基于用户指定的mip0格子数量计算矩形世界区域和格子大小
     
     Args:
         user_grid_count: 用户指定的n×n中的n值 (必须是2的整数次幂)
@@ -91,58 +91,39 @@ def generate_world_single_area_size_and_adjusted_bounds_from_user_grid_count(use
         level_right_pos: 右上角位置 [x, y]
     
     Returns:
-        tuple: (grid_size, adjusted_level_left_pos, adjusted_level_right_pos, grid_count_x, grid_count_y, max_mip_level)
+        tuple: (grid_size_x, grid_size_y, level_left_pos, level_right_pos, grid_count_x, grid_count_y, max_mip_level)
+        其中grid_size_x和grid_size_y分别是X和Y方向的格子大小（浮点数）
     """
     
     # 验证用户输入
     if not validate_user_grid_count(user_grid_count):
         raise ValueError(f"无效的lightmap_mip0_grid_count: {user_grid_count}")
     
-    # 计算原始区域大小
+    # 直接使用用户指定的矩形区域，不调整为正方形
     world_width = level_right_pos[0] - level_left_pos[0]
     world_height = level_right_pos[1] - level_left_pos[1]
-    world_size = max(world_width, world_height)  # 取较大值作为基准，确保完全覆盖
     
-    # 基于用户指定的格子数量反推格子大小 
-    # 为确保格子边长为正整数，我们可能需要稍微放大区域
-    raw_grid_size = world_size / user_grid_count
-    
-    # 向上取整确保格子边长为正整数，这会稍微放大覆盖区域
-    integer_grid_size = int(np.ceil(raw_grid_size))
-    
-    # 计算调整后的区域大小（正方形，可能比原始区域稍大）
-    adjusted_world_size = user_grid_count * integer_grid_size
-    
-    # 保持左下角不变，调整右上角使区域变为正方形
-    adjusted_level_left_pos = level_left_pos.copy()
-    adjusted_level_right_pos = [
-        level_left_pos[0] + adjusted_world_size,
-        level_left_pos[1] + adjusted_world_size
-    ]
+    # 基于用户指定的格子数量计算每个格子的X和Y边长（浮点数）
+    grid_size_x = world_width / user_grid_count
+    grid_size_y = world_height / user_grid_count
     
     # 计算最大mip级别：从n×n一直合并到1×1
     max_mip_level = int(np.log2(user_grid_count))
     
     print(f"👤 用户指定mip0格子数量: {user_grid_count}×{user_grid_count} = {user_grid_count*user_grid_count} 个格子")
-    print(f"📐 原始区域: [{level_left_pos[0]}, {level_left_pos[1]}] 到 [{level_right_pos[0]}, {level_right_pos[1]}]")
+    print(f"📐 目标区域: [{level_left_pos[0]}, {level_left_pos[1]}] 到 [{level_right_pos[0]}, {level_right_pos[1]}]")
     print(f"   - 区域尺寸: {world_width:.1f} × {world_height:.1f}")
-    print(f"📏 格子大小计算:")
-    print(f"   - 理论格子大小: {raw_grid_size:.2f}")
-    print(f"   - 整数格子大小: {integer_grid_size} (向上取整确保为正整数)")
-    print(f"📦 调整后区域: [{adjusted_level_left_pos[0]}, {adjusted_level_left_pos[1]}] 到 [{adjusted_level_right_pos[0]}, {adjusted_level_right_pos[1]}]")
-    print(f"   - 调整后尺寸: {adjusted_world_size} × {adjusted_world_size}")
-    
-    if adjusted_world_size > world_size:
-        overage = adjusted_world_size - world_size
-        print(f"   ⚠️  为确保整数格子大小，区域放大了: {overage:.1f} 单位 ({overage/world_size*100:.1f}%)")
-    
+    print(f"📏 格子大小:")
+    print(f"   - X方向格子大小: {grid_size_x:.6f}")
+    print(f"   - Y方向格子大小: {grid_size_y:.6f}")
     print(f"🌳 完美四叉树结构 ({max_mip_level + 1} 个mip级别):")
     for mip in range(max_mip_level + 1):
         mip_count = user_grid_count // (2 ** mip)
         total_textures = mip_count * mip_count
         print(f"   - mip{mip}: {mip_count}×{mip_count} = {total_textures} 个贴图")
     
-    return integer_grid_size, adjusted_level_left_pos, adjusted_level_right_pos, user_grid_count, user_grid_count, max_mip_level
+    # 返回格式调整：返回两个格子大小值
+    return (grid_size_x, grid_size_y), level_left_pos, level_right_pos, user_grid_count, user_grid_count, max_mip_level
 
 
 def create_placeholder_texture(texture_size, lightmap_base_dir):
@@ -600,8 +581,8 @@ def extract_lightmap(lightmap_path, bias_scale):
     
 
 def group_by_spatial_location_with_adjusted_bounds(json_data, adjusted_level_left_pos, adjusted_level_right_pos, 
-                                                    grid_size, grid_count_x, grid_count_y):
-    """按世界空间位置分组物体，使用调整后的边界确保每个格子都有贴图"""
+                                                    grid_size_x, grid_size_y, grid_count_x, grid_count_y):
+    """按世界空间位置分组物体，使用调整后的边界确保每个格子都有贴图，支持矩形格子"""
     groups = {}
     
     # 使用调整后的世界边界
@@ -609,12 +590,12 @@ def group_by_spatial_location_with_adjusted_bounds(json_data, adjusted_level_lef
     world_max_x, world_max_y = adjusted_level_right_pos
     
     print(f"调整后世界边界: [{world_min_x}, {world_min_y}] 到 [{world_max_x}, {world_max_y}]")
-    print(f"格子大小: {grid_size}, 格子数量: {grid_count_x} x {grid_count_y}")
+    print(f"格子大小: X={grid_size_x:.6f}, Y={grid_size_y:.6f}, 格子数量: {grid_count_x} x {grid_count_y}")
     
     def get_grid_key(x, y):
-        """根据世界坐标计算格子键"""
-        grid_x = int((x - world_min_x) / grid_size)
-        grid_y = int((y - world_min_y) / grid_size)
+        """根据世界坐标计算格子键，支持矩形格子"""
+        grid_x = int((x - world_min_x) / grid_size_x)
+        grid_y = int((y - world_min_y) / grid_size_y)
         # 确保在边界内
         grid_x = max(0, min(grid_x, grid_count_x - 1))
         grid_y = max(0, min(grid_y, grid_count_y - 1))
@@ -724,8 +705,8 @@ def group_by_spatial_location_with_adjusted_bounds(json_data, adjusted_level_lef
             grid_x, grid_y = int(grid_info[0]), int(grid_info[1])
             
             # 计算格子中心世界坐标
-            center_x = world_min_x + (grid_x + 0.5) * grid_size
-            center_y = world_min_y + (grid_y + 0.5) * grid_size
+            center_x = world_min_x + (grid_x + 0.5) * grid_size_x
+            center_y = world_min_y + (grid_y + 0.5) * grid_size_y
             
             # 为空格子创建占位物体
             placeholder_id = f"placeholder_{grid_key}"
@@ -748,8 +729,8 @@ def group_by_spatial_location_with_adjusted_bounds(json_data, adjusted_level_lef
     for grid_key, items in groups.items():
         grid_info = grid_key.replace("grid_", "").split("_")
         grid_x, grid_y = int(grid_info[0]), int(grid_info[1])
-        world_x = world_min_x + grid_x * grid_size
-        world_y = world_min_y + grid_y * grid_size
+        world_x = world_min_x + grid_x * grid_size_x
+        world_y = world_min_y + grid_y * grid_size_y
         placeholder_count = sum(1 for item in items if item.get("is_placeholder", False))
         real_count = len(items) - placeholder_count
         status = f" (真实: {real_count}, 占位: {placeholder_count})" if placeholder_count > 0 else f" (真实: {real_count})"
@@ -1370,15 +1351,16 @@ def process_and_save_packed_textures(results, group_rectangles, texture_size=409
     return updated_lightmap_info
 
 def export_lightmap_converter_data(adjusted_level_left_pos, adjusted_level_right_pos, 
-                                  grid_size, grid_count_x, grid_count_y,
+                                  grid_size_x, grid_size_y, grid_count_x, grid_count_y,
                                   all_results, mip_organizations, max_mip_level, 
                                   scene_name, bigmap_dir, updated_lightmap_info=None):
-    """导出lightmap_converter需要的数据
+    """导出lightmap_converter需要的数据，支持矩形格子
     
     Args:
         adjusted_level_left_pos: 调整后的左下角位置
         adjusted_level_right_pos: 调整后的右上角位置
-        grid_size: 格子大小
+        grid_size_x: X方向格子大小
+        grid_size_y: Y方向格子大小
         grid_count_x: X方向格子数量
         grid_count_y: Y方向格子数量
         all_results: 所有纹理结果
@@ -1517,10 +1499,12 @@ def export_lightmap_converter_data(adjusted_level_left_pos, adjusted_level_right
         "area_bounds": {
             "left_pos": adjusted_level_left_pos,
             "right_pos": adjusted_level_right_pos,
-            "grid_size": grid_size,
+            "grid_size_x": grid_size_x,
+            "grid_size_y": grid_size_y,
+            "grid_size": [grid_size_x, grid_size_y, 0.0, 0.0],  # Vector4格式，前两个是X和Y格子大小
             "grid_count_x": grid_count_x,
             "grid_count_y": grid_count_y,
-            "is_square": True,  # 已确保为正方形
+            "is_square": grid_size_x == grid_size_y,  # 检查格子是否为正方形
             "grid_count_is_even": grid_count_x % 2 == 0  # 验证格子数为偶数
         },
         "mip_info": {
@@ -1536,6 +1520,7 @@ def export_lightmap_converter_data(adjusted_level_left_pos, adjusted_level_right
         "validation": {
             "grid_count_is_even": grid_count_x % 2 == 0 and grid_count_y % 2 == 0,
             "area_is_square": grid_count_x == grid_count_y,
+            "grid_is_square": abs(grid_size_x - grid_size_y) < 1e-6,  # 检查格子本身是否为正方形（浮点数比较）
             "all_grids_have_textures": True,  # 已通过占位符确保
             "texture_array_count_matches": len(lightmap_texture_array) > 0
         }
@@ -1544,6 +1529,7 @@ def export_lightmap_converter_data(adjusted_level_left_pos, adjusted_level_right
     print(f"✅ 导出lightmap_converter数据:")
     print(f"  - 区域边界: [{adjusted_level_left_pos[0]}, {adjusted_level_left_pos[1]}] 到 [{adjusted_level_right_pos[0]}, {adjusted_level_right_pos[1]}]")
     print(f"  - 格子数量: {grid_count_x} x {grid_count_y} (每边格子数为偶数: {grid_count_x % 2 == 0})")
+    print(f"  - 格子大小: X={grid_size_x:.6f}, Y={grid_size_y:.6f} (格子为{'正方形' if converter_data['validation']['grid_is_square'] else '矩形'})")
     print(f"  - 纹理总数: {len(lightmap_texture_array)}")
     print(f"  - 物体映射数: {len(mesh_to_lightmap_id)}")
     print(f"  - 验证通过: 区域正方形={converter_data['validation']['area_is_square']}, 格子偶数={converter_data['validation']['grid_count_is_even']}")
@@ -1699,7 +1685,7 @@ def process_staticmesh_lightmap(args, scene_data, json_data, output_dir):
         
         # 使用基于用户指定格子数量的新算法计算调整后的区域和格子大小
         try:
-            grid_size, adjusted_level_left_pos, adjusted_level_right_pos, grid_count_x, grid_count_y, auto_max_mip_level = \
+            (grid_size_x, grid_size_y), adjusted_level_left_pos, adjusted_level_right_pos, grid_count_x, grid_count_y, auto_max_mip_level = \
                 generate_world_single_area_size_and_adjusted_bounds_from_user_grid_count(user_grid_count, level_left_pos, level_right_pos)
         except ValueError as e:
             print(f"\n❌ 配置错误: {e}")
@@ -1709,14 +1695,15 @@ def process_staticmesh_lightmap(args, scene_data, json_data, output_dir):
         # 使用基于用户指定格子数量计算的最大mip级别
         max_mip_level = auto_max_mip_level
         print(f"🎯 基于用户指定格子数量的完美四叉树算法:")
-        print(f"   - 格子大小: {grid_size} 单位")
+        print(f"   - X方向格子大小: {grid_size_x:.6f} 单位")
+        print(f"   - Y方向格子大小: {grid_size_y:.6f} 单位")
         print(f"   - 格子数量: {grid_count_x}×{grid_count_y} = {grid_count_x*grid_count_y} 个")
         print(f"   - mip级别: {max_mip_level + 1} 级 (mip0到mip{max_mip_level})")
         
         global groups  # 使其成为全局变量，以便在其他函数中访问
         groups = group_by_spatial_location_with_adjusted_bounds(
             json_data, adjusted_level_left_pos, adjusted_level_right_pos, 
-            grid_size, grid_count_x, grid_count_y
+            grid_size_x, grid_size_y, grid_count_x, grid_count_y
         )
         step2_time = time.time() - step2_start_time
         print(f"步骤2: 按空间位置分组完成，找到 {len(groups)} 个格子，耗时: {step2_time:.2f}秒")
@@ -1945,7 +1932,7 @@ def process_staticmesh_lightmap(args, scene_data, json_data, output_dir):
         # 输出lightmap_converter需要的数据
         converter_data = export_lightmap_converter_data(
             adjusted_level_left_pos, adjusted_level_right_pos, 
-            grid_size, grid_count_x, grid_count_y,
+            grid_size_x, grid_size_y, grid_count_x, grid_count_y,
             all_results, mip_organizations, max_mip_level, 
             args.scene, bigmap_dir, updated_lightmap_info
         )
