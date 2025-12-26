@@ -143,15 +143,14 @@ def create_placeholder_texture(texture_size, lightmap_base_dir):
         return placeholder_path
     
     try:
-        # 创建黑色纹理 (RGBA)
+        # 创建灰色纹理 (RGBA)
         width, height = texture_size if isinstance(texture_size, (list, tuple)) else (texture_size, texture_size)
-        black_texture = np.zeros((height, width, 4), dtype=np.uint8)
-        # 设置alpha为255 (不透明)
-        black_texture[:, :, 3] = 255
+        gray_texture = np.full((height, width, 4), [128, 128, 128, 255], dtype=np.uint8)
+        # RGB通道设为128 (灰色)，alpha为255 (不透明)
         
         # 保存为PNG
         os.makedirs(os.path.dirname(placeholder_path), exist_ok=True)
-        Image.fromarray(black_texture).save(placeholder_path)
+        Image.fromarray(gray_texture).save(placeholder_path)
         print(f"已创建占位纹理: {placeholder_path}")
         
         return placeholder_path
@@ -366,8 +365,8 @@ def merge_grid_textures_for_mip(merge_info, grid_texture_paths, texture_size, is
     base_y = merge_info['base_y']
     merge_size = merge_info['merge_size']
     
-    # 创建合并后的纹理（与原始纹理一样大）
-    merged_texture = np.zeros((texture_size, texture_size, 4), dtype=np.uint8)
+    # 创建合并后的纹理（与原始纹理一样大），使用灰色背景
+    merged_texture = np.full((texture_size, texture_size, 4), [128, 128, 128, 255], dtype=np.uint8)
     
     # 计算每个小纹理在合并纹理中的尺寸
     cell_size = texture_size // merge_size
@@ -402,11 +401,11 @@ def merge_grid_textures_for_mip(merge_info, grid_texture_paths, texture_size, is
                     
                 except Exception as e:
                     print(f"警告: 加载纹理 {texture_path} 时出错: {e}")
-                    # 用黑色填充
-                    merged_texture[target_y:target_y+cell_size, target_x:target_x+cell_size] = 0
+                    # 用灰色填充
+                    merged_texture[target_y:target_y+cell_size, target_x:target_x+cell_size] = [128, 128, 128, 255]
             else:
-                # 用黑色填充缺失的grid
-                merged_texture[target_y:target_y+cell_size, target_x:target_x+cell_size] = 0
+                # 用灰色填充缺失的grid
+                merged_texture[target_y:target_y+cell_size, target_x:target_x+cell_size] = [128, 128, 128, 255]
     
     return merged_texture
 
@@ -548,8 +547,8 @@ def extract_lightmap(lightmap_path, bias_scale):
     """根据bias_scale提取灯光贴图"""
     if not os.path.exists(lightmap_path):
         print(f"警告: 找不到灯光贴图: {lightmap_path}")
-        # 返回一个占位图像
-        return np.zeros((64, 64, 4), dtype=np.uint8)
+        # 返回一个灰色占位图像
+        return np.full((64, 64, 4), [128, 128, 128, 255], dtype=np.uint8)
     
     try:
         img = Image.open(lightmap_path)
@@ -577,7 +576,7 @@ def extract_lightmap(lightmap_path, bias_scale):
         return img_array[y_min:y_max, x_min:x_max]
     except Exception as e:
         print(f"提取灯光贴图时出错: {lightmap_path}, 错误: {e}")
-        return np.zeros((64, 64, 4), dtype=np.uint8)
+        return np.full((64, 64, 4), [128, 128, 128, 255], dtype=np.uint8)
     
 
 def group_by_spatial_location_with_adjusted_bounds(json_data, adjusted_level_left_pos, adjusted_level_right_pos, 
@@ -908,12 +907,12 @@ def process_and_save_single_packed_texture(texture_result, rectangles, texture_i
         mip_width = max(1, texture_width >> mip_level)
         mip_height = max(1, texture_height >> mip_level)
         
-        # 创建LQ纹理
-        texture_array_lq = np.zeros((mip_height, mip_width, 4), dtype=np.uint8)
+        # 创建LQ纹理（灰色背景）
+        texture_array_lq = np.full((mip_height, mip_width, 4), [128, 128, 128, 255], dtype=np.uint8)
         mip_textures_lq.append(texture_array_lq)
         
-        # 创建Dir纹理
-        texture_array_dir = np.zeros((mip_height, mip_width, 4), dtype=np.uint8)
+        # 创建Dir纹理（灰色背景）
+        texture_array_dir = np.full((mip_height, mip_width, 4), [128, 128, 128, 255], dtype=np.uint8)
         mip_textures_dir.append(texture_array_dir)
     
     print(f"处理格子 '{grid_key}' 的纹理 {texture_index}，包含 {texture_result.rectangle_count} 个矩形，生成mip0纹理 (中间mip级别不再单独输出)")
@@ -1115,8 +1114,8 @@ def process_and_save_packed_textures(results, group_rectangles, texture_size=409
             mip_width = max(1, texture.texture_width >> mip_level)
             mip_height = max(1, texture.texture_height >> mip_level)
             
-            # 创建LQ纹理
-            texture_array = np.zeros((mip_height, mip_width, 4), dtype=np.uint8)
+            # 创建LQ纹理（灰色背景）
+            texture_array = np.full((mip_height, mip_width, 4), [128, 128, 128, 255], dtype=np.uint8)
             texture_mip_levels.append({
                 "texture_index": texture.texture_index,
                 "mip_level": mip_level,
@@ -1126,8 +1125,8 @@ def process_and_save_packed_textures(results, group_rectangles, texture_size=409
                 "rectangles": []
             })
             
-            # 创建Dir纹理
-            texture_array_dir = np.zeros((mip_height, mip_width, 4), dtype=np.uint8)
+            # 创建Dir纹理（灰色背景）
+            texture_array_dir = np.full((mip_height, mip_width, 4), [128, 128, 128, 255], dtype=np.uint8)
             texture_dir_mip_levels.append({
                 "texture_index": texture.texture_index,
                 "mip_level": mip_level,

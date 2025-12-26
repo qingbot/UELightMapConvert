@@ -12,7 +12,9 @@ ALL_LIGHT_MAP_DATA = {
         "source_terrain_xml_path" : "C:/Users/qingbo.tang/Desktop/ai/basic_level.terrain.ast",
         # 在LightmapData的AST的路径，最终结果将会输入到这个文件之中
         "lightmap_data_ast_path_in_chaos" : "D:/ev/dev/wolfgang/_games/proven_ground/_content/New Folder1/lightMaps/lightmap_data.ast",
-        # 地形的大小偏移，用以在runtime时，从世界坐标计算lightmap的uv坐标  uv = (world_pos + offset) / size; 注意offset的正负号使得uv: 0<uv<1
+        # 地形的大小偏移，用以在runtime时，从世界坐标计算lightmap的uv坐标
+        # 格式：[size_x, size_y, offset_x, offset_y]
+        # 实际计算：uv = world_pos * scale + offset，其中 scale = 1/[size_x, size_y], offset = [offset_x, offset_y]/[size_x, size_y]
         "terrain_size_offset" : [512,512,512,512],
         # 合并为一张大纹理时，该纹理的大小
         "lightmap_texture_size" : 2048,
@@ -47,7 +49,7 @@ ALL_LIGHT_MAP_DATA = {
         "lightmap_path_in_chaos_assets" : "_project/testSimpleLM/lightMaps",
         "source_terrain_xml_path" : "D:/ev/dev/chaos/_content/levels/_test/basic_level/basic_level.terrain.ast",
         "lightmap_data_ast_path_in_chaos" : "E:/EV/dev/wolfgang/_games/proven_ground/_content/levels/lightmapscene/TestLightMapData.level_lightmap.ast.level_lightmap.ast",
-        "terrain_size_offset" : [2048,2048,1024,1024],
+        "terrain_size_offset" : [2048,2048,1024,1024],  # [size_x, size_y, offset_x, offset_y]
         "lightmap_texture_size" : 2048,
 
         # 合并为一张大纹理时，该纹理的最小边长
@@ -61,11 +63,11 @@ ALL_LIGHT_MAP_DATA = {
 
         # mip0 一张贴图的边长对应的世界边长
         # mip0_texture_size已移除，改为用户直接指定mip0格子数量  
-        "lightmap_mip0_grid_count": 8,  # mip0级别的n×n格子数中的n值 (必须是2的整数次幂: 2,4,8,16,32...)
+        "lightmap_mip0_grid_count": 16,  # mip0级别的n×n格子数中的n值 (必须是2的整数次幂: 2,4,8,16,32...)
         
         # 运行时lightmap加载距离数组，将写入ast的lightmap_mip_distance标签
         # 这是纯粹的运行时加载距离，与计算格子大小无关
-        "lightmap_runtime_mip_distances": [10000, 20000, 40000, 80000],  # 运行时各mip级别的加载距离（虚幻厘米单位）
+        "lightmap_runtime_mip_distances": [10000, 20000, 40000, 80000, 160000],  # 运行时各mip级别的加载距离（虚幻厘米单位）
 
         "lightmap_absolute_path" : "E:/EV/dev/wolfgang/_games/proven_ground/_content/testSimpleLM/lightMaps",
         "original_lightmap_absolute_path" : "C:/chaos_integrated_tools/data_analysis/scene/light/light_map/BigLightmap"
